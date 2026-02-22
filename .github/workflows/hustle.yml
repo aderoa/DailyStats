@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: 'Game date (YYYY-MM-DD). Leave blank for yesterday.'
+        description: 'Game date (YYYY-MM-DD). Leave blank for today.'
         required: false
         type: string
       end_date:
@@ -33,7 +33,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install nba_api
+        run: pip install requests
 
       - name: Fetch hustle stats
         run: |
