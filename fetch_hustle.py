@@ -13,12 +13,24 @@ import sys
 import os
 import json
 import time
+import requests
 from datetime import datetime, timedelta, timezone
 
-from nba_api.stats.endpoints import scoreboardv3, boxscorehustlev2
-
-SLEEP = 0.7  # seconds between API calls
+SLEEP = 1.0  # seconds between API calls
+MAX_RETRIES = 3
+TIMEOUT = 60
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+
+# Headers required by stats.nba.com — without these it blocks/times out
+STATS_HEADERS = {
+    'Host': 'stats.nba.com',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.nba.com/',
+    'Origin': 'https://www.nba.com',
+    'Connection': 'keep-alive',
+}
 
 
 def get_today_pacific():
@@ -29,28 +41,66 @@ def get_today_pacific():
 
 
 def fetch_game_ids(date_str):
-    """Get all finished game IDs for a date."""
+    """Get all game IDs for a date using the CDN scoreboard (no auth needed)."""
     print(f'  Scoreboard for {date_str}...')
-    sb = scoreboardv3.ScoreboardV3(game_date=date_str, league_id='00')
-    data = sb.get_dict()
-    games = data.get('scoreboard', {}).get('games', [])
+
+    # Use CDN schedule (same as the HTML app — reliable, no headers needed)
+    url = 'https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json'
+    try:
+        res = requests.get(url, timeout=30)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        print(f'    Schedule fetch failed: {e}')
+        return []
+
+    # Parse date — schedule uses "MM/DD/YYYY 12:00:00 AM" format
+    y, m, d = date_str.split('-')
+    targets = [
+        f'{int(m)}/{int(d)}/{y}',
+        f'{m}/{d}/{y}',
+        f'{int(m)}/{int(d)}/{y} 12:00:00 AM',
+    ]
+
     ids = []
-    for g in games:
-        status = g.get('gameStatus', 0)
-        if status >= 2:  # in progress or final
-            ids.append(g['gameId'])
+    for gd in data.get('leagueSchedule', {}).get('gameDates', []):
+        gd_date = gd.get('gameDate', '').split(' ')[0]
+        if gd_date in targets or gd.get('gameDate') in targets:
+            for g in gd.get('games', []):
+                status = g.get('gameStatus', 0)
+                if status >= 2:  # in progress or final
+                    ids.append(g['gameId'])
+            break
+
     print(f'    {len(ids)} completed/live game(s)')
     return ids
 
 
 def fetch_hustle(game_id):
-    """Fetch hustle stats for one game. Returns list of player dicts."""
+    """Fetch hustle stats for one game using direct requests with proper headers."""
     print(f'    Hustle for {game_id}...')
-    try:
-        box = boxscorehustlev2.BoxScoreHustleV2(game_id=game_id)
-        data = box.get_dict()
-    except Exception as e:
-        print(f'      ERROR: {e}')
+
+    url = 'https://stats.nba.com/stats/boxscorehustlev2'
+    params = {'GameID': game_id}
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            res = requests.get(url, params=params, headers=STATS_HEADERS, timeout=TIMEOUT)
+            if res.status_code == 200:
+                data = res.json()
+                break
+            print(f'      Attempt {attempt}: HTTP {res.status_code}')
+        except requests.exceptions.Timeout:
+            print(f'      Attempt {attempt}: Timeout')
+        except Exception as e:
+            print(f'      Attempt {attempt}: {e}')
+
+        if attempt < MAX_RETRIES:
+            wait = 3 * attempt
+            print(f'      Retrying in {wait}s...')
+            time.sleep(wait)
+    else:
+        print(f'      FAILED after {MAX_RETRIES} attempts')
         return []
 
     players = []
@@ -112,7 +162,7 @@ def process_date(date_str):
             'players': all_players
         }, f, separators=(',', ':'))
 
-    print(f'  ✅ Saved {len(all_players)} players → {filepath}')
+    print(f'  Saved {len(all_players)} players -> {filepath}')
     return True
 
 
@@ -143,8 +193,7 @@ def main():
         if len(dates) > 1:
             time.sleep(1)
 
-    print(f'\n✅ Done! {success}/{len(dates)} dates processed.')
-    # Exit with error if nothing succeeded (useful for GitHub Actions)
+    print(f'\nDone! {success}/{len(dates)} dates processed.')
     if success == 0 and dates:
         sys.exit(1)
 
