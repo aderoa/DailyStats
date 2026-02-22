@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Daily Stats — Hoopsmatic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-card: #151d2e;
+  --bg-row-hover: #1a2540;
+  --border: #1e2d4a;
+  --text-primary: #e8ecf4;
+  --text-secondary: #8892a6;
+  --text-muted: #555f73;
+  --accent-gold: #f0b637;
+  --accent-blue: #3b82f6;
+  --accent-cyan: #22d3ee;
+  --positive: #10b981;
+  --negative: #ef4444;
+  --orange: #f97316;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg-primary); color:var(--text-primary); font-family:'Source Sans 3',sans-serif; min-height:100vh; line-height:1.5; }
+
+/* Header */
+.header { background:linear-gradient(135deg,#0d1321 0%,#172040 50%,#0d1321 100%); border-bottom:1px solid var(--border); padding:2rem 2rem 1.5rem; position:relative; overflow:hidden; }
+.header::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(59,130,246,0.03) 60px,rgba(59,130,246,0.03) 61px); pointer-events:none; }
+.header-inner { max-width:1400px; margin:0 auto; position:relative; z-index:1; display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:1rem; }
+.header-left {}
+.header-brand { display:flex; align-items:baseline; gap:0.75rem; margin-bottom:0.25rem; }
+.header-brand h1 { font-family:'Oswald',sans-serif; font-weight:700; font-size:2rem; letter-spacing:0.05em; text-transform:uppercase; }
+.header-brand .tag { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--accent-gold); background:rgba(240,182,55,0.12); padding:0.2em 0.6em; border-radius:3px; letter-spacing:0.08em; text-transform:uppercase; }
+.header-subtitle { color:var(--text-secondary); font-size:0.95rem; }
+
+.date-controls { display:flex; align-items:center; gap:0.75rem; }
+.date-controls input[type="date"] {
+  font-family:'JetBrains Mono',monospace; font-size:0.9rem; padding:0.55rem 0.85rem;
+  background:var(--bg-card); border:1px solid var(--border); border-radius:6px;
+  color:var(--text-primary); outline:none; color-scheme:dark; cursor:pointer;
+}
+.date-controls input[type="date"]:focus { border-color:var(--accent-blue); }
+.btn-fetch {
+  font-family:'Oswald',sans-serif; font-size:0.95rem; font-weight:600; letter-spacing:0.04em;
+  text-transform:uppercase; padding:0.55rem 1.5rem; border:none; border-radius:6px;
+  background:var(--accent-blue); color:#fff; cursor:pointer; transition:all 0.2s;
+}
+.btn-fetch:hover { background:#2563eb; transform:translateY(-1px); }
+.btn-fetch:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+.btn-fetch.loading { background:var(--text-muted); }
+.btn-prev, .btn-next {
+  font-size:1.1rem; padding:0.45rem 0.7rem; background:var(--bg-card); border:1px solid var(--border);
+  border-radius:6px; color:var(--text-secondary); cursor:pointer; transition:all 0.15s;
+}
+.btn-prev:hover, .btn-next:hover { border-color:var(--accent-blue); color:var(--text-primary); }
+
+/* Summary bar */
+.summary-bar { max-width:1400px; margin:1.25rem auto 0; padding:0 2rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:0.75rem; }
+.stat-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1rem 1.15rem; }
+.stat-card .label { font-family:'JetBrains Mono',monospace; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-muted); margin-bottom:0.2rem; }
+.stat-card .value { font-family:'Oswald',sans-serif; font-size:1.4rem; font-weight:600; }
+.stat-card .value .unit { font-size:0.8rem; font-weight:400; color:var(--text-secondary); }
+.stat-card .sub { font-size:0.78rem; color:var(--text-secondary); margin-top:0.15rem; }
+
+/* Games grid */
+.games-section { max-width:1400px; margin:1.5rem auto 0; padding:0 2rem; }
+.games-section h2 { font-family:'Oswald',sans-serif; font-size:1.15rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-secondary); margin-bottom:0.75rem; }
+.games-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:0.75rem; }
+
+.game-card {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1rem;
+  cursor:pointer; transition:all 0.2s; position:relative; overflow:hidden;
+}
+.game-card:hover { border-color:var(--accent-blue); transform:translateY(-2px); box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+.game-card.active { border-color:var(--accent-gold); }
+.game-card .status-badge {
+  font-family:'JetBrains Mono',monospace; font-size:0.6rem; text-transform:uppercase;
+  letter-spacing:0.08em; padding:0.15em 0.5em; border-radius:3px; position:absolute; top:0.65rem; right:0.65rem;
+}
+.game-card .status-badge.final { background:rgba(16,185,129,0.15); color:var(--positive); }
+.game-card .status-badge.live { background:rgba(239,68,68,0.2); color:var(--negative); animation:pulse 2s infinite; }
+.game-card .status-badge.upcoming { background:rgba(136,146,166,0.15); color:var(--text-secondary); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.game-card .team-row { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 0; }
+.game-card .team-row img { width:28px; height:28px; object-fit:contain; }
+.game-card .team-row .team-name { font-family:'Oswald',sans-serif; font-size:0.95rem; font-weight:500; flex:1; }
+.game-card .team-row .team-record { font-size:0.72rem; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+.game-card .team-row .score { font-family:'Oswald',sans-serif; font-size:1.15rem; font-weight:700; min-width:36px; text-align:right; }
+.game-card .team-row .score.winner { color:var(--accent-gold); }
+.game-card .vs-divider { border:none; border-top:1px solid var(--border); margin:0.15rem 0; }
+
+/* Rankings table */
+.rankings-section { max-width:1400px; margin:1.75rem auto 3rem; padding:0 2rem; }
+.rankings-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem; }
+.rankings-header h2 { font-family:'Oswald',sans-serif; font-size:1.15rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-secondary); }
+.rankings-filters { display:flex; gap:0.5rem; align-items:center; }
+.rankings-filters select {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:6px;
+  padding:0.45rem 0.7rem; color:var(--text-primary); font-family:'Source Sans 3',sans-serif;
+  font-size:0.82rem; outline:none; cursor:pointer;
+}
+.rankings-filters input {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:6px;
+  padding:0.45rem 0.7rem; color:var(--text-primary); font-family:'Source Sans 3',sans-serif;
+  font-size:0.82rem; outline:none; width:160px;
+}
+.rankings-filters input::placeholder { color:var(--text-muted); }
+
+.table-wrap { overflow-x:auto; border-radius:8px; border:1px solid var(--border); }
+table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+thead th {
+  font-family:'JetBrains Mono',monospace; font-size:0.65rem; text-transform:uppercase;
+  letter-spacing:0.08em; color:var(--text-muted); padding:0.7rem 0.5rem;
+  background:var(--bg-secondary); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10; cursor:pointer; white-space:nowrap; user-select:none;
+}
+thead th:hover { color:var(--text-primary); }
+thead th.sorted { color:var(--accent-gold); }
+thead th .arrow { font-size:0.55rem; margin-left:0.2rem; }
+tbody tr { border-bottom:1px solid rgba(30,45,74,0.4); transition:background 0.12s; }
+tbody tr:hover { background:var(--bg-row-hover); }
+tbody td { padding:0.55rem 0.5rem; white-space:nowrap; }
+td.player-cell { display:flex; align-items:center; gap:0.5rem; min-width:180px; }
+td.player-cell img { width:32px; height:24px; object-fit:cover; border-radius:3px; background:var(--bg-secondary); }
+td.player-cell .pname { font-weight:600; font-size:0.85rem; }
+td.player-cell .pteam { font-size:0.7rem; color:var(--text-muted); margin-left:0.3rem; }
+td.num { text-align:right; font-family:'JetBrains Mono',monospace; font-size:0.78rem; }
+td.rank-cell { font-family:'Oswald',sans-serif; font-weight:600; text-align:center; color:var(--accent-gold); }
+td.rat-cell { font-family:'Oswald',sans-serif; font-weight:700; text-align:right; font-size:0.9rem; }
+td.positive { color:var(--positive); }
+td.negative { color:var(--negative); }
+
+.top-badge {
+  display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.55rem;
+  padding:0.1em 0.35em; border-radius:2px; margin-left:0.3rem; font-weight:600;
+}
+.top-badge.gold { background:rgba(240,182,55,0.15); color:var(--accent-gold); }
+.top-badge.silver { background:rgba(136,146,166,0.15); color:var(--text-secondary); }
+.top-badge.bronze { background:rgba(249,115,22,0.15); color:var(--orange); }
+
+/* Box score modal */
+.box-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; display:none; align-items:center; justify-content:center; padding:1rem; }
+.box-overlay.open { display:flex; }
+.box-modal {
+  background:var(--bg-primary); border:1px solid var(--border); border-radius:10px;
+  max-width:1100px; width:100%; max-height:90vh; overflow-y:auto; position:relative;
+}
+.box-modal-header {
+  display:flex; align-items:center; justify-content:space-between; padding:1.25rem 1.5rem;
+  border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg-primary); z-index:5;
+}
+.box-modal-header h3 { font-family:'Oswald',sans-serif; font-size:1.1rem; text-transform:uppercase; letter-spacing:0.04em; }
+.box-close { background:none; border:none; color:var(--text-secondary); font-size:1.4rem; cursor:pointer; padding:0.25rem 0.5rem; }
+.box-close:hover { color:var(--text-primary); }
+.box-content { padding:1rem 1.5rem 1.5rem; }
+.box-team-label { font-family:'Oswald',sans-serif; font-size:0.95rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--accent-cyan); margin:1rem 0 0.4rem; display:flex; align-items:center; gap:0.5rem; }
+.box-team-label:first-child { margin-top:0; }
+.box-team-label img { width:24px; height:24px; }
+.box-content table { font-size:0.78rem; }
+.box-content thead th { font-size:0.6rem; padding:0.5rem 0.4rem; }
+.box-content tbody td { padding:0.4rem; }
+.box-content tbody tr.dnp { opacity:0.4; }
+.box-content .team-totals td { font-weight:700; border-top:2px solid var(--border); background:var(--bg-secondary); }
+
+/* Empty state */
+.empty-state {
+  text-align:center; padding:4rem 2rem; color:var(--text-muted);
+}
+.empty-state .icon { font-size:3rem; margin-bottom:1rem; opacity:0.5; }
+.empty-state h3 { font-family:'Oswald',sans-serif; font-size:1.2rem; color:var(--text-secondary); margin-bottom:0.4rem; }
+.empty-state p { font-size:0.9rem; max-width:400px; margin:0 auto; }
+
+/* Error state */
+.error-banner {
+  max-width:1400px; margin:1rem auto; padding:0 2rem;
+}
+.error-banner .inner {
+  background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px;
+  padding:0.85rem 1.2rem; font-size:0.88rem; color:#fca5a5;
+}
+
+/* Loading spinner */
+.spinner { display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,0.2); border-top-color:#fff; border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:middle; margin-right:0.4rem; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:var(--bg-primary); }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:#2a3f6a; }
+
+@media (max-width:768px) {
+  .header-inner { flex-direction:column; align-items:flex-start; }
+  .summary-bar { grid-template-columns:repeat(2,1fr); }
+  .games-grid { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="header-left">
+      <div class="header-brand">
+        <h1>Daily Stats</h1>
+        <span class="tag">Hoopsmatic</span>
+      </div>
+      <div class="header-subtitle">Box scores, advanced stats & player ratings</div>
+    </div>
+    <div class="date-controls">
+      <button class="btn-prev" onclick="shiftDate(-1)" title="Previous day">◀</button>
+      <input type="date" id="datePicker">
+      <button class="btn-next" onclick="shiftDate(1)" title="Next day">▶</button>
+      <button class="btn-fetch" id="fetchBtn" onclick="fetchDay()">Fetch Games</button>
+    </div>
+  </div>
+</div>
+
+<div id="errorArea"></div>
+<div id="summaryArea"></div>
+<div id="gamesArea"></div>
+<div id="rankingsArea">
+  <div class="empty-state">
+    <div class="icon">🏀</div>
+    <h3>Select a date to get started</h3>
+    <p>Pick a game date and click "Fetch Games" to load box scores, advanced stats, and player ratings.</p>
+  </div>
+</div>
+
+<div class="box-overlay" id="boxOverlay" onclick="if(event.target===this)closeBox()">
+  <div class="box-modal">
+    <div class="box-modal-header">
+      <h3 id="boxTitle"></h3>
+      <button class="box-close" onclick="closeBox()">✕</button>
+    </div>
+    <div class="box-content" id="boxContent"></div>
+  </div>
+</div>
+
+<script>
+// ===================== CONSTANTS =====================
+const TEAM_INFO = {
+  ATL:{name:'Hawks',city:'Atlanta',id:1610612737,color:'#E03A3E'},
+  BOS:{name:'Celtics',city:'Boston',id:1610612738,color:'#007A33'},
+  BKN:{name:'Nets',city:'Brooklyn',id:1610612751,color:'#000000'},
+  CHA:{name:'Hornets',city:'Charlotte',id:1610612766,color:'#1D1160'},
+  CHI:{name:'Bulls',city:'Chicago',id:1610612741,color:'#CE1141'},
+  CLE:{name:'Cavaliers',city:'Cleveland',id:1610612739,color:'#860038'},
+  DAL:{name:'Mavericks',city:'Dallas',id:1610612742,color:'#00538C'},
+  DEN:{name:'Nuggets',city:'Denver',id:1610612743,color:'#0E2240'},
+  DET:{name:'Pistons',city:'Detroit',id:1610612765,color:'#C8102E'},
+  GSW:{name:'Warriors',city:'Golden State',id:1610612744,color:'#1D428A'},
+  HOU:{name:'Rockets',city:'Houston',id:1610612745,color:'#CE1141'},
+  IND:{name:'Pacers',city:'Indiana',id:1610612754,color:'#002D62'},
+  LAC:{name:'Clippers',city:'LA',id:1610612746,color:'#C8102E'},
+  LAL:{name:'Lakers',city:'Los Angeles',id:1610612747,color:'#552583'},
+  MEM:{name:'Grizzlies',city:'Memphis',id:1610612763,color:'#5D76A9'},
+  MIA:{name:'Heat',city:'Miami',id:1610612748,color:'#98002E'},
+  MIL:{name:'Bucks',city:'Milwaukee',id:1610612749,color:'#00471B'},
+  MIN:{name:'Timberwolves',city:'Minnesota',id:1610612750,color:'#0C2340'},
+  NOP:{name:'Pelicans',city:'New Orleans',id:1610612740,color:'#0C2340'},
+  NYK:{name:'Knicks',city:'New York',id:1610612752,color:'#006BB6'},
+  OKC:{name:'Thunder',city:'Oklahoma City',id:1610612760,color:'#007AC1'},
+  ORL:{name:'Magic',city:'Orlando',id:1610612753,color:'#0077C0'},
+  PHI:{name:'76ers',city:'Philadelphia',id:1610612755,color:'#006BB6'},
+  PHX:{name:'Suns',city:'Phoenix',id:1610612756,color:'#1D1160'},
+  POR:{name:'Trail Blazers',city:'Portland',id:1610612757,color:'#E03A3E'},
+  SAC:{name:'Kings',city:'Sacramento',id:1610612758,color:'#5A2D81'},
+  SAS:{name:'Spurs',city:'San Antonio',id:1610612759,color:'#C4CED4'},
+  TOR:{name:'Raptors',city:'Toronto',id:1610612761,color:'#CE1141'},
+  UTA:{name:'Jazz',city:'Utah',id:1610612762,color:'#002B5C'},
+  WAS:{name:'Wizards',city:'Washington',id:1610612764,color:'#002B5C'}
+};
+
+// Reverse lookup: teamId → tricode
+const ID_TO_TRI = {};
+for (const [tri, info] of Object.entries(TEAM_INFO)) ID_TO_TRI[info.id] = tri;
+
+function teamLogo(triOrId) {
+  const id = typeof triOrId === 'number' ? triOrId : (TEAM_INFO[triOrId]?.id || 0);
+  return `https://cdn.nba.com/logos/nba/${id}/primary/L/logo.svg`;
+}
+function playerHeadshot(personId) {
+  return `https://cdn.nba.com/headshots/nba/latest/260x190/${personId}.png`;
+}
+function teamFullName(tri) {
+  const t = TEAM_INFO[tri];
+  return t ? `${t.city} ${t.name}` : tri;
+}
+
+// ===================== STATE =====================
+let scheduleCache = null;
+let currentGames = [];     // game metadata from schedule
+let currentBoxScores = [];  // fetched box score data
+let allPlayers = [];        // processed player stats
+let sortCol = 'rat';
+let sortDir = 'desc';
+
+// ===================== DATE UTILITIES =====================
+function todayPacific() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+
+function shiftDate(delta) {
+  const picker = document.getElementById('datePicker');
+  const d = new Date(picker.value + 'T12:00:00');
+  d.setDate(d.getDate() + delta);
+  picker.value = d.toISOString().slice(0, 10);
+}
+
+// ===================== MINUTES PARSER =====================
+function parseMinutes(iso) {
+  if (!iso || iso === '0' || iso === '') return 0;
+  // Format: "PT32M15.00S" or "32:15" or just a number
+  if (typeof iso === 'number') return iso;
+  const m1 = iso.match(/PT(\d+)M([\d.]+)S/);
+  if (m1) return parseInt(m1[1]) + parseFloat(m1[2]) / 60;
+  const m2 = iso.match(/PT(\d+)M/);
+  if (m2) return parseInt(m2[1]);
+  const m3 = iso.match(/^(\d+):([\d.]+)$/);
+  if (m3) return parseInt(m3[1]) + parseFloat(m3[2]) / 60;
+  return parseFloat(iso) || 0;
+}
+
+// ===================== STAT COMPUTATION =====================
+function computePlayerStats(player, teamTri, opponentTri, gameId) {
+  const s = player.statistics;
+  if (!s) return null;
+
+  const min = parseMinutes(s.minutes || s.minutesCalculated || 0);
+  if (min <= 0) return null; // DNP
+
+  const pts = s.points || 0;
+  const fgm = s.fieldGoalsMade || 0;
+  const fga = s.fieldGoalsAttempted || 0;
+  const fg3m = s.threePointersMade || 0;
+  const fg3a = s.threePointersAttempted || 0;
+  const ftm = s.freeThrowsMade || 0;
+  const fta = s.freeThrowsAttempted || 0;
+  const orb = s.reboundsOffensive ?? s.offensiveRebounds ?? 0;
+  const drb = s.reboundsDefensive ?? s.defensiveRebounds ?? 0;
+  const reb = s.reboundsTotal ?? (orb + drb);
+  const ast = s.assists || 0;
+  const stl = s.steals || 0;
+  const blk = s.blocks || 0;
+  const tov = s.turnovers || 0;
+  const pf = s.foulsPersonal || 0;
+  const pm = s.plusMinusPoints ?? s.plusMinus ?? 0;
+
+  // TS%
+  const tsa = fga + 0.44 * fta;
+  const ts = tsa > 0 ? pts / (2 * tsa) : 0;
+
+  // FG%, 3P%, FT%
+  const fgPct = fga > 0 ? fgm / fga : 0;
+  const fg3Pct = fg3a > 0 ? fg3m / fg3a : 0;
+  const ftPct = fta > 0 ? ftm / fta : 0;
+
+  // Game Score (Hollinger)
+  const gameScore = pts + 0.4*fgm - 0.7*fga - 0.4*(fta - ftm)
+    + 0.7*orb + 0.3*drb + stl + 0.7*ast + 0.7*blk - 0.4*pf - tov;
+
+  // RAT — efficiency-weighted composite
+  const tsFactor = Math.min(1.5, Math.max(0.5, tsa > 0 ? (ts / 0.55) : 0.7));
+  const scoringValue = pts * tsFactor;
+  const rat = scoringValue + ast * 1.5 + reb * 1.0 + stl * 2.5 + blk * 2.0 - tov * 2.0 + pm * 0.25;
+
+  return {
+    personId: player.personId,
+    name: player.name || `${player.firstName || ''} ${player.familyName || ''}`.trim(),
+    team: teamTri,
+    opponent: opponentTri,
+    gameId,
+    jerseyNum: player.jerseyNum || '',
+    position: player.position || '',
+    min: Math.round(min * 10) / 10,
+    pts, fgm, fga, fg3m, fg3a, ftm, fta, orb, drb, reb, ast, stl, blk, tov, pf, pm,
+    fgPct, fg3Pct, ftPct, ts, gameScore: Math.round(gameScore * 10) / 10,
+    rat: Math.round(rat * 10) / 10
+  };
+}
+
+// ===================== API FETCH =====================
+const SCHEDULE_URLS = [
+  'https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json',
+  'https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json'
+];
+
+async function fetchSchedule() {
+  if (scheduleCache) return scheduleCache;
+  for (const url of SCHEDULE_URLS) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.leagueSchedule?.gameDates) {
+        scheduleCache = data;
+        return data;
+      }
+    } catch (e) { /* try next */ }
+  }
+  throw new Error('Could not load NBA schedule. The CDN endpoints may be blocked by CORS.');
+}
+
+function findGamesForDate(schedule, dateStr) {
+  // dateStr = 'YYYY-MM-DD'
+  const [y, m, d] = dateStr.split('-');
+  const targets = [
+    `${parseInt(m)}/${parseInt(d)}/${y}`,        // M/D/YYYY
+    `${m}/${d}/${y}`,                              // MM/DD/YYYY
+    `${parseInt(m)}/${parseInt(d)}/${y} 12:00:00 AM`
+  ];
+
+  for (const gd of schedule.leagueSchedule.gameDates) {
+    const gdDate = gd.gameDate.split(' ')[0];
+    if (targets.includes(gdDate) || targets.includes(gd.gameDate)) {
+      return gd.games || [];
+    }
+  }
+
+  // Fallback: match by gameDateTimeUTC or gameDateUTC
+  const allGames = [];
+  for (const gd of schedule.leagueSchedule.gameDates) {
+    for (const g of (gd.games || [])) {
+      const gDate = (g.gameDateTimeUTC || g.gameDateUTC || '').slice(0, 10);
+      // NBA games after ~5pm ET on date D have UTC date of D+1, so also check day before
+      const prevDate = new Date(dateStr + 'T12:00:00');
+      prevDate.setDate(prevDate.getDate() + 1);
+      const nextStr = prevDate.toISOString().slice(0, 10);
+      if (gDate === dateStr || gDate === nextStr) {
+        allGames.push(g);
+      }
+    }
+  }
+  return allGames;
+}
+
+async function fetchBoxScore(gameId) {
+  const url = `https://cdn.nba.com/static/json/liveData/boxscore/boxscore_${gameId}.json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Box score ${gameId}: ${res.status}`);
+  return await res.json();
+}
+
+// ===================== MAIN FETCH FLOW =====================
+async function fetchDay() {
+  const dateStr = document.getElementById('datePicker').value;
+  if (!dateStr) return;
+
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="spinner"></span>Loading...';
+  document.getElementById('errorArea').innerHTML = '';
+
+  try {
+    // 1. Get schedule
+    const schedule = await fetchSchedule();
+
+    // 2. Find games for date
+    const games = findGamesForDate(schedule, dateStr);
+    currentGames = games;
+
+    if (!games.length) {
+      document.getElementById('summaryArea').innerHTML = '';
+      document.getElementById('gamesArea').innerHTML = '';
+      document.getElementById('rankingsArea').innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📅</div>
+          <h3>No games found</h3>
+          <p>No NBA games scheduled for ${formatDisplayDate(dateStr)}. Try a different date.</p>
+        </div>`;
+      return;
+    }
+
+    // 3. Fetch box scores in parallel
+    const boxPromises = games.map(g => fetchBoxScore(g.gameId).catch(err => {
+      console.warn(`Failed to fetch box score for ${g.gameId}:`, err);
+      return null;
+    }));
+    const boxResults = await Promise.all(boxPromises);
+    currentBoxScores = boxResults.filter(b => b !== null);
+
+    // 4. Process all player stats
+    allPlayers = [];
+    for (const box of currentBoxScores) {
+      if (!box?.game) continue;
+      const gm = box.game;
+      const homeTri = gm.homeTeam?.teamTricode || ID_TO_TRI[gm.homeTeam?.teamId] || '???';
+      const awayTri = gm.awayTeam?.teamTricode || ID_TO_TRI[gm.awayTeam?.teamId] || '???';
+
+      for (const p of (gm.homeTeam?.players || [])) {
+        const stats = computePlayerStats(p, homeTri, awayTri, gm.gameId);
+        if (stats) allPlayers.push(stats);
+      }
+      for (const p of (gm.awayTeam?.players || [])) {
+        const stats = computePlayerStats(p, awayTri, homeTri, gm.gameId);
+        if (stats) allPlayers.push(stats);
+      }
+    }
+
+    // 5. Sort by RAT default
+    sortCol = 'rat';
+    sortDir = 'desc';
+    allPlayers.sort((a, b) => b.rat - a.rat);
+
+    // 6. Render
+    renderSummary(dateStr);
+    renderGames(dateStr);
+    renderRankings();
+
+  } catch (err) {
+    document.getElementById('errorArea').innerHTML = `
+      <div class="error-banner"><div class="inner">⚠️ ${err.message}</div></div>`;
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = 'Fetch Games';
+  }
+}
+
+// ===================== RENDERING =====================
+function formatDisplayDate(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function renderSummary(dateStr) {
+  const nGames = currentBoxScores.length;
+  const nPlayers = allPlayers.length;
+  const top = allPlayers[0];
+  const topScorer = [...allPlayers].sort((a, b) => b.pts - a.pts)[0];
+
+  let html = `<div class="summary-bar">`;
+  html += `<div class="stat-card"><div class="label">Date</div><div class="value">${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div><div class="sub">${formatDisplayDate(dateStr).split(',')[0]}</div></div>`;
+  html += `<div class="stat-card"><div class="label">Games</div><div class="value">${nGames}</div><div class="sub">${nPlayers} players</div></div>`;
+  if (top) {
+    html += `<div class="stat-card"><div class="label">Player of the Day</div><div class="value" style="font-size:1.1rem;">${top.name}</div><div class="sub">${top.rat} RAT · ${top.pts}p/${top.reb}r/${top.ast}a</div></div>`;
+  }
+  if (topScorer && topScorer !== top) {
+    html += `<div class="stat-card"><div class="label">High Scorer</div><div class="value" style="font-size:1.1rem;">${topScorer.name}</div><div class="sub">${topScorer.pts} PTS · ${(topScorer.ts * 100).toFixed(1)}% TS</div></div>`;
+  }
+  html += `</div>`;
+  document.getElementById('summaryArea').innerHTML = html;
+}
+
+function renderGames(dateStr) {
+  let html = `<div class="games-section"><h2>Games — ${formatDisplayDate(dateStr)}</h2><div class="games-grid">`;
+
+  for (const box of currentBoxScores) {
+    const gm = box.game;
+    const homeTri = gm.homeTeam?.teamTricode || '???';
+    const awayTri = gm.awayTeam?.teamTricode || '???';
+    const homeScore = gm.homeTeam?.score ?? 0;
+    const awayScore = gm.awayTeam?.score ?? 0;
+    const homeWin = homeScore > awayScore;
+
+    // Game status
+    const status = gm.gameStatus || gm.gameStatusText || '';
+    let statusClass = 'final', statusText = 'Final';
+    if (status === 1 || (typeof status === 'string' && status.includes('ET'))) {
+      statusClass = 'upcoming'; statusText = gm.gameStatusText || 'Upcoming';
+    } else if (status === 2) {
+      statusClass = 'live'; statusText = gm.gameStatusText || 'LIVE';
+    } else {
+      statusText = gm.gameStatusText || 'Final';
+    }
+
+    html += `<div class="game-card" onclick="openBox('${gm.gameId}')">`;
+    html += `<span class="status-badge ${statusClass}">${statusText}</span>`;
+
+    // Away team
+    html += `<div class="team-row">`;
+    html += `<img src="${teamLogo(awayTri)}" onerror="this.style.display='none'">`;
+    html += `<span class="team-name">${teamFullName(awayTri)}</span>`;
+    html += `<span class="score ${!homeWin && homeScore !== awayScore ? 'winner' : ''}">${awayScore}</span>`;
+    html += `</div>`;
+
+    html += `<hr class="vs-divider">`;
+
+    // Home team
+    html += `<div class="team-row">`;
+    html += `<img src="${teamLogo(homeTri)}" onerror="this.style.display='none'">`;
+    html += `<span class="team-name">${teamFullName(homeTri)}</span>`;
+    html += `<span class="score ${homeWin ? 'winner' : ''}">${homeScore}</span>`;
+    html += `</div>`;
+
+    html += `</div>`;
+  }
+
+  html += `</div></div>`;
+  document.getElementById('gamesArea').innerHTML = html;
+}
+
+function renderRankings() {
+  const players = [...allPlayers];
+  players.sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return sortDir === 'asc' ? va - vb : vb - va;
+  });
+
+  const cols = [
+    { key: 'rank', label: '#', cls: 'rank-cell' },
+    { key: 'name', label: 'Player', cls: 'player-cell' },
+    { key: 'min', label: 'Min' },
+    { key: 'pts', label: 'Pts' },
+    { key: 'reb', label: 'Reb' },
+    { key: 'ast', label: 'Ast' },
+    { key: 'stl', label: 'Stl' },
+    { key: 'blk', label: 'Blk' },
+    { key: 'tov', label: 'TO' },
+    { key: 'pm', label: '+/−' },
+    { key: 'fgPct', label: 'FG%' },
+    { key: 'fg3Pct', label: '3P%' },
+    { key: 'ftPct', label: 'FT%' },
+    { key: 'ts', label: 'TS%' },
+    { key: 'gameScore', label: 'GmScr' },
+    { key: 'rat', label: 'RAT', cls: 'rat-cell' }
+  ];
+
+  let html = `<div class="rankings-section">`;
+  html += `<div class="rankings-header"><h2>Player Rankings</h2>`;
+  html += `<div class="rankings-filters">`;
+  html += `<input type="text" placeholder="Search player..." oninput="filterRankings(this.value)">`;
+  html += `<select onchange="filterTeam(this.value)"><option value="">All Teams</option>`;
+  const teams = [...new Set(allPlayers.map(p => p.team))].sort();
+  for (const t of teams) html += `<option value="${t}">${t}</option>`;
+  html += `</select>`;
+  html += `<select onchange="filterMinutes(this.value)"><option value="0">All Minutes</option><option value="10">10+ MIN</option><option value="20">20+ MIN</option><option value="25">25+ MIN</option></select>`;
+  html += `</div></div>`;
+
+  html += `<div class="table-wrap"><table><thead><tr>`;
+  for (const c of cols) {
+    const arrow = sortCol === c.key ? (sortDir === 'desc' ? '▼' : '▲') : '';
+    const sortedCls = sortCol === c.key ? ' sorted' : '';
+    html += `<th class="${sortedCls}" onclick="doSort('${c.key}')">${c.label}${arrow ? `<span class="arrow">${arrow}</span>` : ''}</th>`;
+  }
+  html += `</tr></thead><tbody id="rankingsBody">`;
+
+  for (let i = 0; i < players.length; i++) {
+    html += buildPlayerRow(players[i], i + 1);
+  }
+
+  html += `</tbody></table></div></div>`;
+  document.getElementById('rankingsArea').innerHTML = html;
+}
+
+function buildPlayerRow(p, rank) {
+  const badge = rank === 1 ? '<span class="top-badge gold">★ POTD</span>'
+    : rank === 2 ? '<span class="top-badge silver">2ND</span>'
+    : rank === 3 ? '<span class="top-badge bronze">3RD</span>' : '';
+
+  let tr = `<tr data-name="${p.name.toLowerCase()}" data-team="${p.team}" data-min="${p.min}">`;
+  tr += `<td class="rank-cell">${rank}</td>`;
+  tr += `<td class="player-cell"><img src="${playerHeadshot(p.personId)}" onerror="this.style.display='none'" loading="lazy"><span class="pname">${p.name}${badge}</span><span class="pteam">${p.team}</span></td>`;
+  tr += `<td class="num">${p.min.toFixed(0)}</td>`;
+  tr += `<td class="num" style="font-weight:700;">${p.pts}</td>`;
+  tr += `<td class="num">${p.reb}</td>`;
+  tr += `<td class="num">${p.ast}</td>`;
+  tr += `<td class="num">${p.stl}</td>`;
+  tr += `<td class="num">${p.blk}</td>`;
+  tr += `<td class="num">${p.tov}</td>`;
+  tr += `<td class="num ${p.pm > 0 ? 'positive' : p.pm < 0 ? 'negative' : ''}">${p.pm > 0 ? '+' : ''}${p.pm}</td>`;
+  tr += `<td class="num">${(p.fgPct * 100).toFixed(0)}%</td>`;
+  tr += `<td class="num">${(p.fg3Pct * 100).toFixed(0)}%</td>`;
+  tr += `<td class="num">${(p.ftPct * 100).toFixed(0)}%</td>`;
+  tr += `<td class="num" style="color:${p.ts >= 0.60 ? 'var(--positive)' : p.ts < 0.45 ? 'var(--negative)' : 'inherit'}">${(p.ts * 100).toFixed(1)}%</td>`;
+  tr += `<td class="num">${p.gameScore.toFixed(1)}</td>`;
+  tr += `<td class="rat-cell" style="color:${p.rat >= 30 ? 'var(--accent-gold)' : p.rat >= 20 ? 'var(--accent-cyan)' : 'inherit'}">${p.rat.toFixed(1)}</td>`;
+  tr += `</tr>`;
+  return tr;
+}
+
+// ===================== SORTING & FILTERING =====================
+function doSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortCol = col;
+    sortDir = (col === 'name' || col === 'team') ? 'asc' : 'desc';
+  }
+  renderRankings();
+}
+
+function filterRankings(query) {
+  const q = query.toLowerCase();
+  document.querySelectorAll('#rankingsBody tr').forEach(tr => {
+    tr.style.display = tr.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+
+function filterTeam(team) {
+  document.querySelectorAll('#rankingsBody tr').forEach(tr => {
+    tr.style.display = (!team || tr.dataset.team === team) ? '' : 'none';
+  });
+}
+
+function filterMinutes(minThreshold) {
+  const min = parseFloat(minThreshold);
+  document.querySelectorAll('#rankingsBody tr').forEach(tr => {
+    tr.style.display = parseFloat(tr.dataset.min) >= min ? '' : 'none';
+  });
+}
+
+// ===================== BOX SCORE MODAL =====================
+function openBox(gameId) {
+  const box = currentBoxScores.find(b => b.game?.gameId === gameId);
+  if (!box) return;
+
+  const gm = box.game;
+  const homeTri = gm.homeTeam?.teamTricode || '???';
+  const awayTri = gm.awayTeam?.teamTricode || '???';
+
+  document.getElementById('boxTitle').textContent =
+    `${teamFullName(awayTri)} ${gm.awayTeam?.score ?? 0} — ${teamFullName(homeTri)} ${gm.homeTeam?.score ?? 0}`;
+
+  let html = '';
+  for (const side of ['awayTeam', 'homeTeam']) {
+    const team = gm[side];
+    if (!team) continue;
+    const tri = team.teamTricode || '???';
+    const players = team.players || [];
+
+    html += `<div class="box-team-label"><img src="${teamLogo(tri)}" onerror="this.style.display='none'"> ${teamFullName(tri)} (${team.score ?? 0})</div>`;
+    html += `<div class="table-wrap"><table><thead><tr>`;
+    html += `<th>Player</th><th>Min</th><th>Pts</th><th>FGM-A</th><th>3PM-A</th><th>FTM-A</th>`;
+    html += `<th>ORB</th><th>DRB</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>PF</th><th>+/−</th><th>TS%</th><th>GmScr</th><th>RAT</th>`;
+    html += `</tr></thead><tbody>`;
+
+    const processed = [];
+    for (const p of players) {
+      const stats = computePlayerStats(p, tri, tri === homeTri ? awayTri : homeTri, gameId);
+      processed.push({ raw: p, stats });
+    }
+
+    // Sort: played first (by minutes desc), then DNPs
+    processed.sort((a, b) => (b.stats?.min || 0) - (a.stats?.min || 0));
+
+    let teamTotals = { pts:0, fgm:0, fga:0, fg3m:0, fg3a:0, ftm:0, fta:0, orb:0, drb:0, reb:0, ast:0, stl:0, blk:0, tov:0, pf:0 };
+
+    for (const { raw: p, stats: s } of processed) {
+      const name = p.name || `${p.firstName || ''} ${p.familyName || ''}`.trim();
+      if (!s) {
+        html += `<tr class="dnp"><td style="font-weight:500;">${name}</td><td colspan="17" style="color:var(--text-muted);font-size:0.75rem;">DNP</td></tr>`;
+        continue;
+      }
+      teamTotals.pts += s.pts; teamTotals.fgm += s.fgm; teamTotals.fga += s.fga;
+      teamTotals.fg3m += s.fg3m; teamTotals.fg3a += s.fg3a; teamTotals.ftm += s.ftm; teamTotals.fta += s.fta;
+      teamTotals.orb += s.orb; teamTotals.drb += s.drb; teamTotals.reb += s.reb;
+      teamTotals.ast += s.ast; teamTotals.stl += s.stl; teamTotals.blk += s.blk;
+      teamTotals.tov += s.tov; teamTotals.pf += s.pf;
+
+      html += `<tr>`;
+      html += `<td style="font-weight:500;min-width:130px;">${name}</td>`;
+      html += `<td class="num">${s.min.toFixed(0)}</td>`;
+      html += `<td class="num" style="font-weight:700;">${s.pts}</td>`;
+      html += `<td class="num">${s.fgm}-${s.fga}</td>`;
+      html += `<td class="num">${s.fg3m}-${s.fg3a}</td>`;
+      html += `<td class="num">${s.ftm}-${s.fta}</td>`;
+      html += `<td class="num">${s.orb}</td>`;
+      html += `<td class="num">${s.drb}</td>`;
+      html += `<td class="num">${s.reb}</td>`;
+      html += `<td class="num">${s.ast}</td>`;
+      html += `<td class="num">${s.stl}</td>`;
+      html += `<td class="num">${s.blk}</td>`;
+      html += `<td class="num">${s.tov}</td>`;
+      html += `<td class="num">${s.pf}</td>`;
+      html += `<td class="num ${s.pm > 0 ? 'positive' : s.pm < 0 ? 'negative' : ''}">${s.pm > 0 ? '+' : ''}${s.pm}</td>`;
+      html += `<td class="num">${(s.ts * 100).toFixed(1)}%</td>`;
+      html += `<td class="num">${s.gameScore.toFixed(1)}</td>`;
+      html += `<td class="num" style="font-weight:700;color:${s.rat >= 30 ? 'var(--accent-gold)' : s.rat >= 20 ? 'var(--accent-cyan)' : 'inherit'}">${s.rat.toFixed(1)}</td>`;
+      html += `</tr>`;
+    }
+
+    // Team totals row
+    const t = teamTotals;
+    html += `<tr class="team-totals">`;
+    html += `<td>TOTALS</td><td></td>`;
+    html += `<td class="num">${t.pts}</td>`;
+    html += `<td class="num">${t.fgm}-${t.fga}</td>`;
+    html += `<td class="num">${t.fg3m}-${t.fg3a}</td>`;
+    html += `<td class="num">${t.ftm}-${t.fta}</td>`;
+    html += `<td class="num">${t.orb}</td><td class="num">${t.drb}</td><td class="num">${t.reb}</td>`;
+    html += `<td class="num">${t.ast}</td><td class="num">${t.stl}</td><td class="num">${t.blk}</td>`;
+    html += `<td class="num">${t.tov}</td><td class="num">${t.pf}</td>`;
+    html += `<td></td><td></td><td></td><td></td>`;
+    html += `</tr>`;
+
+    html += `</tbody></table></div>`;
+  }
+
+  document.getElementById('boxContent').innerHTML = html;
+  document.getElementById('boxOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeBox() {
+  document.getElementById('boxOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// Close on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBox(); });
+
+// ===================== INIT =====================
+document.getElementById('datePicker').value = todayPacific();
+</script>
+</body>
+</html>
