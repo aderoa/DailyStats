@@ -1,370 +1,476 @@
-#!/usr/bin/env python3
-"""
-NBA Daily Stats Fetcher → Google Sheets
-Hoopsmatic Suite
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Daily Stats — Hoopsmatic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg-primary:#0a0e17;--bg-secondary:#111827;--bg-card:#151d2e;--bg-row-hover:#1a2540;--border:#1e2d4a;--text-primary:#e8ecf4;--text-secondary:#8892a6;--text-muted:#555f73;--accent-gold:#f0b637;--accent-blue:#3b82f6;--accent-cyan:#22d3ee;--positive:#10b981;--negative:#ef4444;--orange:#f97316}
+*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg-primary);color:var(--text-primary);font-family:'Source Sans 3',sans-serif;min-height:100vh;line-height:1.5}
 
-Fetches box scores for a given date using nba_api,
-computes advanced stats (TS%, Game Score, RAT),
-and pushes all player-game rows to a Google Sheet tab.
+/* Header */
+.header{background:linear-gradient(135deg,#0d1321 0%,#172040 50%,#0d1321 100%);border-bottom:1px solid var(--border);padding:2rem 2rem 1.5rem;position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(59,130,246,0.03) 60px,rgba(59,130,246,0.03) 61px);pointer-events:none}
+.header-inner{max-width:1400px;margin:0 auto;position:relative;z-index:1;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.header-brand{display:flex;align-items:baseline;gap:0.75rem;margin-bottom:0.25rem}
+.header-brand h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:2rem;letter-spacing:0.05em;text-transform:uppercase}
+.header-brand .tag{font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--accent-gold);background:rgba(240,182,55,0.12);padding:0.2em 0.6em;border-radius:3px;letter-spacing:0.08em;text-transform:uppercase}
+.header-subtitle{color:var(--text-secondary);font-size:0.95rem}
 
-SETUP:
-  1. pip install nba_api gspread google-auth
-  2. Create a Google Cloud service account with Sheets API enabled
-  3. Download the JSON key file
-  4. Share your Google Sheet with the service account email
-  5. Update CONFIG below with your sheet ID and key file path
+/* Date controls */
+.date-controls{display:flex;align-items:center;gap:0.75rem}
+.date-controls input[type="date"]{font-family:'JetBrains Mono',monospace;font-size:0.9rem;padding:0.55rem 0.85rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);outline:none;color-scheme:dark;cursor:pointer}
+.date-controls input[type="date"]:focus{border-color:var(--accent-blue)}
+.btn-fetch{font-family:'Oswald',sans-serif;font-size:0.95rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:0.55rem 1.5rem;border:none;border-radius:6px;background:var(--accent-blue);color:#fff;cursor:pointer;transition:all 0.2s}
+.btn-fetch:hover{background:#2563eb;transform:translateY(-1px)}
+.btn-fetch:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.btn-prev,.btn-next{font-size:1.1rem;padding:0.45rem 0.7rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);cursor:pointer;transition:all 0.15s}
+.btn-prev:hover,.btn-next:hover{border-color:var(--accent-blue);color:var(--text-primary)}
 
-USAGE:
-  python daily_stats_fetcher.py                  # Fetch today's games
-  python daily_stats_fetcher.py 2026-02-20       # Fetch specific date
-  python daily_stats_fetcher.py 2026-02-15 2026-02-20  # Fetch date range
-"""
+/* Summary bar */
+.summary-bar{max-width:1400px;margin:1.25rem auto 0;padding:0 2rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem}
+.stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.15rem}
+.stat-card .label{font-family:'JetBrains Mono',monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);margin-bottom:0.2rem}
+.stat-card .value{font-family:'Oswald',sans-serif;font-size:1.4rem;font-weight:600}
+.stat-card .sub{font-size:0.78rem;color:var(--text-secondary);margin-top:0.15rem}
 
-import sys
-import time
-import json
-from datetime import datetime, timedelta
+/* Games grid */
+.games-section{max-width:1400px;margin:1.5rem auto 0;padding:0 2rem}
+.games-section h2{font-family:'Oswald',sans-serif;font-size:1.15rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:0.75rem}
+.games-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.75rem}
+.game-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden}
+.game-card:hover{border-color:var(--accent-blue);transform:translateY(-2px);box-shadow:0 4px 20px rgba(0,0,0,0.3)}
+.game-card .status-badge{font-family:'JetBrains Mono',monospace;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.08em;padding:0.15em 0.5em;border-radius:3px;position:absolute;top:0.65rem;right:0.65rem}
+.game-card .status-badge.final{background:rgba(16,185,129,0.15);color:var(--positive)}
+.game-card .status-badge.live{background:rgba(239,68,68,0.2);color:var(--negative);animation:pulse 2s infinite}
+.game-card .status-badge.upcoming{background:rgba(136,146,166,0.15);color:var(--text-secondary)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.game-card .team-row{display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0}
+.game-card .team-row img{width:28px;height:28px;object-fit:contain}
+.game-card .team-row .team-name{font-family:'Oswald',sans-serif;font-size:0.95rem;font-weight:500;flex:1}
+.game-card .team-row .score{font-family:'Oswald',sans-serif;font-size:1.15rem;font-weight:700;min-width:36px;text-align:right}
+.game-card .team-row .score.winner{color:var(--accent-gold)}
+.game-card .vs-divider{border:none;border-top:1px solid var(--border);margin:0.15rem 0}
 
-# ============================================================
-# CONFIG — Update these for your environment
-# ============================================================
-SERVICE_ACCOUNT_FILE = 'service_account.json'    # Path to your Google service account JSON
-SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE'      # Google Sheets spreadsheet ID
-TAB_NAME = 'DailyStats'                          # Tab/sheet name to write to
-SLEEP_BETWEEN_GAMES = 0.6                        # Seconds between API calls (rate limiting)
+/* Rankings table */
+.rankings-section{max-width:1400px;margin:1.75rem auto 3rem;padding:0 2rem}
+.rankings-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem}
+.rankings-header h2{font-family:'Oswald',sans-serif;font-size:1.15rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary)}
+.rankings-filters{display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap}
+.rankings-filters select,.rankings-filters input{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:0.45rem 0.7rem;color:var(--text-primary);font-family:'Source Sans 3',sans-serif;font-size:0.82rem;outline:none}
+.rankings-filters input{width:160px}
+.rankings-filters input::placeholder{color:var(--text-muted)}
+.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:0.82rem}
+thead th{font-family:'JetBrains Mono',monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);padding:0.7rem 0.5rem;background:var(--bg-secondary);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;cursor:pointer;white-space:nowrap;user-select:none}
+thead th:hover{color:var(--text-primary)}
+thead th.sorted{color:var(--accent-gold)}
+thead th .arrow{font-size:0.55rem;margin-left:0.2rem}
+tbody tr{border-bottom:1px solid rgba(30,45,74,0.4);transition:background 0.12s}
+tbody tr:hover{background:var(--bg-row-hover)}
+tbody td{padding:0.55rem 0.5rem;white-space:nowrap}
+td.player-cell{display:flex;align-items:center;gap:0.5rem;min-width:180px}
+td.player-cell img{width:32px;height:24px;object-fit:cover;border-radius:3px;background:var(--bg-secondary)}
+td.player-cell .pname{font-weight:600;font-size:0.85rem}
+td.player-cell .pteam{font-size:0.7rem;color:var(--text-muted);margin-left:0.3rem}
+td.num{text-align:right;font-family:'JetBrains Mono',monospace;font-size:0.78rem}
+td.rank-cell{font-family:'Oswald',sans-serif;font-weight:600;text-align:center;color:var(--accent-gold)}
+td.rat-cell{font-family:'Oswald',sans-serif;font-weight:700;text-align:right;font-size:0.9rem}
+td.positive{color:var(--positive)}
+td.negative{color:var(--negative)}
+.top-badge{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:0.55rem;padding:0.1em 0.35em;border-radius:2px;margin-left:0.3rem;font-weight:600}
+.top-badge.gold{background:rgba(240,182,55,0.15);color:var(--accent-gold)}
+.top-badge.silver{background:rgba(136,146,166,0.15);color:var(--text-secondary)}
+.top-badge.bronze{background:rgba(249,115,22,0.15);color:var(--orange)}
 
-# ============================================================
-# IMPORTS (with helpful error messages)
-# ============================================================
-try:
-    from nba_api.stats.endpoints import scoreboardv3, boxscoretraditionalv2
-except ImportError:
-    print("ERROR: nba_api not installed. Run: pip install nba_api")
-    sys.exit(1)
+/* Box score modal */
+.box-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;display:none;align-items:center;justify-content:center;padding:1rem}
+.box-overlay.open{display:flex}
+.box-modal{background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;max-width:1100px;width:100%;max-height:90vh;overflow-y:auto}
+.box-modal-header{display:flex;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg-primary);z-index:5}
+.box-modal-header h3{font-family:'Oswald',sans-serif;font-size:1.1rem;text-transform:uppercase;letter-spacing:0.04em}
+.box-close{background:none;border:none;color:var(--text-secondary);font-size:1.4rem;cursor:pointer;padding:0.25rem 0.5rem}
+.box-close:hover{color:var(--text-primary)}
+.box-content{padding:1rem 1.5rem 1.5rem}
+.box-team-label{font-family:'Oswald',sans-serif;font-size:0.95rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent-cyan);margin:1rem 0 0.4rem;display:flex;align-items:center;gap:0.5rem}
+.box-team-label:first-child{margin-top:0}
+.box-team-label img{width:24px;height:24px}
+.box-content table{font-size:0.78rem}
+.box-content thead th{font-size:0.6rem;padding:0.5rem 0.4rem}
+.box-content tbody td{padding:0.4rem}
+.box-content tbody tr.dnp{opacity:0.4}
+.box-content .team-totals td{font-weight:700;border-top:2px solid var(--border);background:var(--bg-secondary)}
 
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-except ImportError:
-    print("ERROR: gspread/google-auth not installed. Run: pip install gspread google-auth")
-    sys.exit(1)
+/* States */
+.empty-state{text-align:center;padding:4rem 2rem;color:var(--text-muted)}
+.empty-state .icon{font-size:3rem;margin-bottom:1rem;opacity:0.5}
+.empty-state h3{font-family:'Oswald',sans-serif;font-size:1.2rem;color:var(--text-secondary);margin-bottom:0.4rem}
+.empty-state p{font-size:0.9rem;max-width:400px;margin:0 auto}
+.error-banner{max-width:1400px;margin:1rem auto;padding:0 2rem}
+.error-banner .inner{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:0.85rem 1.2rem;font-size:0.88rem;color:#fca5a5}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:0.4rem}
+@keyframes spin{to{transform:rotate(360deg)}}
 
+/* Progress */
+.progress-bar{max-width:1400px;margin:1rem auto;padding:0 2rem;display:none}
+.progress-bar.active{display:block}
+.progress-inner{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:0.75rem 1.2rem;font-size:0.85rem;color:var(--text-secondary)}
+.progress-inner .prog-fill{height:3px;background:var(--accent-blue);border-radius:2px;margin-top:0.5rem;transition:width 0.3s}
 
-# ============================================================
-# GOOGLE SHEETS CONNECTION
-# ============================================================
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg-primary)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+@media(max-width:768px){.header-inner{flex-direction:column;align-items:flex-start}.summary-bar{grid-template-columns:repeat(2,1fr)}.games-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
 
-def connect_sheets():
-    """Connect to Google Sheets and return the worksheet."""
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+<div class="header">
+  <div class="header-inner">
+    <div class="header-left">
+      <div class="header-brand"><h1>Daily Stats</h1><span class="tag">Hoopsmatic</span></div>
+      <div class="header-subtitle">Box scores, advanced stats & player ratings</div>
+    </div>
+    <div class="date-controls">
+      <button class="btn-prev" onclick="shiftDate(-1)" title="Previous day">◀</button>
+      <input type="date" id="datePicker">
+      <button class="btn-next" onclick="shiftDate(1)" title="Next day">▶</button>
+      <button class="btn-fetch" id="fetchBtn" onclick="fetchDay()">Fetch Games</button>
+    </div>
+  </div>
+</div>
 
-    # Get or create the tab
-    try:
-        ws = spreadsheet.worksheet(TAB_NAME)
-    except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=TAB_NAME, rows=1000, cols=40)
-        # Write header row
-        ws.update('A1', [HEADER_ROW])
-        print(f"Created new tab '{TAB_NAME}' with headers.")
+<div id="errorArea"></div>
+<div class="progress-bar" id="progressBar"><div class="progress-inner"><span id="progressText">Loading...</span><div style="background:var(--border);border-radius:2px;height:3px;margin-top:0.5rem"><div class="prog-fill" id="progressFill" style="width:0%"></div></div></div></div>
+<div id="summaryArea"></div>
+<div id="gamesArea"></div>
+<div id="rankingsArea">
+  <div class="empty-state">
+    <div class="icon">🏀</div>
+    <h3>Select a date to get started</h3>
+    <p>Pick a game date and click "Fetch Games" to load box scores, advanced stats, and player ratings.</p>
+  </div>
+</div>
 
-    return ws
+<div class="box-overlay" id="boxOverlay" onclick="if(event.target===this)closeBox()">
+  <div class="box-modal">
+    <div class="box-modal-header"><h3 id="boxTitle"></h3><button class="box-close" onclick="closeBox()">✕</button></div>
+    <div class="box-content" id="boxContent"></div>
+  </div>
+</div>
 
+<script>
+// ===================== CORS PROXY =====================
+// corsproxy.io is reliable and free. If it goes down, swap to an alternative.
+const PROXY = 'https://corsproxy.io/?';
+function proxied(url) { return PROXY + encodeURIComponent(url); }
 
-# ============================================================
-# HEADER DEFINITION
-# ============================================================
-HEADER_ROW = [
-    'Date', 'GameID', 'Player', 'PersonID', 'Team', 'Opponent',
-    'Home', 'MIN', 'PTS', 'FGM', 'FGA', '3PM', '3PA', 'FTM', 'FTA',
-    'ORB', 'DRB', 'REB', 'AST', 'STL', 'BLK', 'TOV', 'PF', '+/-',
-    'FG%', '3P%', 'FT%', 'TS%', 'GmScr', 'RAT',
-    'HomeTeam', 'AwayTeam', 'HomeScore', 'AwayScore', 'GameStatus'
-]
+// ===================== TEAM INFO =====================
+const TEAM_IDS={ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764};
+const ID_TO_TRI={};for(const[tri,id]of Object.entries(TEAM_IDS))ID_TO_TRI[id]=tri;
+const TEAM_NAMES={ATL:'Atlanta Hawks',BOS:'Boston Celtics',BKN:'Brooklyn Nets',CHA:'Charlotte Hornets',CHI:'Chicago Bulls',CLE:'Cleveland Cavaliers',DAL:'Dallas Mavericks',DEN:'Denver Nuggets',DET:'Detroit Pistons',GSW:'Golden State Warriors',HOU:'Houston Rockets',IND:'Indiana Pacers',LAC:'LA Clippers',LAL:'Los Angeles Lakers',MEM:'Memphis Grizzlies',MIA:'Miami Heat',MIL:'Milwaukee Bucks',MIN:'Minnesota Timberwolves',NOP:'New Orleans Pelicans',NYK:'New York Knicks',OKC:'Oklahoma City Thunder',ORL:'Orlando Magic',PHI:'Philadelphia 76ers',PHX:'Phoenix Suns',POR:'Portland Trail Blazers',SAC:'Sacramento Kings',SAS:'San Antonio Spurs',TOR:'Toronto Raptors',UTA:'Utah Jazz',WAS:'Washington Wizards'};
+function teamLogo(tri){return`https://cdn.nba.com/logos/nba/${TEAM_IDS[tri]||0}/primary/L/logo.svg`}
+function playerHeadshot(pid){return`https://cdn.nba.com/headshots/nba/latest/260x190/${pid}.png`}
 
+// ===================== STATE =====================
+let scheduleCache = null;
+let currentBoxScores = [];
+let allPlayers = [];
+let sortCol = 'rat', sortDir = 'desc';
 
-# ============================================================
-# STAT COMPUTATION
-# ============================================================
-def compute_advanced(row):
-    """Compute TS%, Game Score, and RAT from a stats row dict."""
-    pts = row['PTS']
-    fgm, fga = row['FGM'], row['FGA']
-    fg3m, fg3a = row['3PM'], row['3PA']
-    ftm, fta = row['FTM'], row['FTA']
-    orb, drb, reb = row['ORB'], row['DRB'], row['REB']
-    ast, stl, blk = row['AST'], row['STL'], row['BLK']
-    tov, pf, pm = row['TOV'], row['PF'], row['+/-']
+// ===================== DATE =====================
+function todayPacific(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'})}
+function shiftDate(delta){
+  const p=document.getElementById('datePicker');
+  const d=new Date(p.value+'T12:00:00');
+  d.setDate(d.getDate()+delta);
+  p.value=d.toISOString().slice(0,10);
+}
+function fmtDate(s){return new Date(s+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}
+function progress(msg,pct){
+  const bar=document.getElementById('progressBar');
+  bar.classList.add('active');
+  document.getElementById('progressText').textContent=msg;
+  document.getElementById('progressFill').style.width=pct+'%';
+}
+function hideProgress(){document.getElementById('progressBar').classList.remove('active')}
 
-    # True Shooting %
-    tsa = fga + 0.44 * fta
-    ts = pts / (2 * tsa) if tsa > 0 else 0
+// ===================== MINUTES PARSER =====================
+function parseMin(s){
+  if(!s||s==='0'||s==='')return 0;
+  if(typeof s==='number')return s;
+  let m=s.match(/PT(\d+)M([\d.]+)S/);if(m)return parseInt(m[1])+parseFloat(m[2])/60;
+  m=s.match(/PT(\d+)M/);if(m)return parseInt(m[1]);
+  m=s.match(/^(\d+):([\d.]+)$/);if(m)return parseInt(m[1])+parseFloat(m[2])/60;
+  return parseFloat(s)||0;
+}
 
-    # Shooting percentages
-    fg_pct = fgm / fga if fga > 0 else 0
-    fg3_pct = fg3m / fg3a if fg3a > 0 else 0
-    ft_pct = ftm / fta if fta > 0 else 0
+// ===================== STAT COMPUTATION =====================
+function computeStats(p, teamTri, oppTri, gameId){
+  const s=p.statistics;
+  if(!s)return null;
+  const min=parseMin(s.minutes||s.minutesCalculated||0);
+  if(min<=0)return null;
 
-    # Game Score (Hollinger)
-    gm_scr = (pts + 0.4 * fgm - 0.7 * fga - 0.4 * (fta - ftm)
-              + 0.7 * orb + 0.3 * drb + stl + 0.7 * ast
-              + 0.7 * blk - 0.4 * pf - tov)
+  const pts=s.points||0, fgm=s.fieldGoalsMade||0, fga=s.fieldGoalsAttempted||0;
+  const fg3m=s.threePointersMade||0, fg3a=s.threePointersAttempted||0;
+  const ftm=s.freeThrowsMade||0, fta=s.freeThrowsAttempted||0;
+  const orb=s.reboundsOffensive??0, drb=s.reboundsDefensive??0, reb=s.reboundsTotal??(orb+drb);
+  const ast=s.assists||0, stl=s.steals||0, blk=s.blocks||0;
+  const tov=s.turnovers||0, pf=s.foulsPersonal||0, pm=s.plusMinusPoints??s.plusMinus??0;
 
-    # RAT — efficiency-weighted composite
-    ts_factor = min(1.5, max(0.5, ts / 0.55 if tsa > 0 else 0.7))
-    scoring_value = pts * ts_factor
-    rat = (scoring_value + ast * 1.5 + reb * 1.0
-           + stl * 2.5 + blk * 2.0 - tov * 2.0 + pm * 0.25)
+  const tsa=fga+0.44*fta;
+  const ts=tsa>0?pts/(2*tsa):0;
+  const fgPct=fga>0?fgm/fga:0, fg3Pct=fg3a>0?fg3m/fg3a:0, ftPct=fta>0?ftm/fta:0;
 
-    row['FG%'] = round(fg_pct, 4)
-    row['3P%'] = round(fg3_pct, 4)
-    row['FT%'] = round(ft_pct, 4)
-    row['TS%'] = round(ts, 4)
-    row['GmScr'] = round(gm_scr, 1)
-    row['RAT'] = round(rat, 1)
-    return row
+  // Game Score (Hollinger)
+  const gmScr=pts+0.4*fgm-0.7*fga-0.4*(fta-ftm)+0.7*orb+0.3*drb+stl+0.7*ast+0.7*blk-0.4*pf-tov;
 
+  // RAT — efficiency-weighted composite
+  const tsFactor=Math.min(1.5,Math.max(0.5,tsa>0?ts/0.55:0.7));
+  const rat=pts*tsFactor+ast*1.5+reb*1.0+stl*2.5+blk*2.0-tov*2.0+pm*0.25;
 
-# ============================================================
-# PARSE MINUTES
-# ============================================================
-def parse_minutes(min_str):
-    """Parse NBA minutes string (e.g. 'PT32M15.00S', '32:15', '32') into float."""
-    if not min_str:
-        return 0
-    s = str(min_str)
-    # PT32M15.00S format
-    if 'PT' in s:
-        import re
-        m = re.match(r'PT(\d+)M([\d.]+)S', s)
-        if m:
-            return int(m.group(1)) + float(m.group(2)) / 60
-        m = re.match(r'PT(\d+)M', s)
-        if m:
-            return int(m.group(1))
-    # MM:SS format
-    if ':' in s:
-        parts = s.split(':')
-        return int(parts[0]) + float(parts[1]) / 60
-    # Plain number
-    try:
-        return float(s)
-    except ValueError:
-        return 0
+  return {
+    personId:p.personId, name:p.name||`${p.firstName||''} ${p.familyName||''}`.trim(),
+    team:teamTri, opponent:oppTri, gameId,
+    min:Math.round(min*10)/10, pts,fgm,fga,fg3m,fg3a,ftm,fta,orb,drb,reb,ast,stl,blk,tov,pf,pm,
+    fgPct,fg3Pct,ftPct,ts,gmScr:Math.round(gmScr*10)/10,rat:Math.round(rat*10)/10
+  };
+}
 
+// ===================== API FETCH =====================
+async function fetchSchedule(){
+  if(scheduleCache)return scheduleCache;
+  progress('Loading NBA schedule...',5);
+  const urls=[
+    'https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json',
+    'https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json'
+  ];
+  for(const url of urls){
+    try{
+      const res=await fetch(proxied(url));
+      if(!res.ok)continue;
+      const data=await res.json();
+      if(data.leagueSchedule?.gameDates){scheduleCache=data;return data}
+    }catch(e){/* try next */}
+  }
+  throw new Error('Could not load NBA schedule. The CORS proxy may be unavailable — try refreshing.');
+}
 
-# ============================================================
-# FETCH GAMES FOR A DATE
-# ============================================================
-def fetch_games(date_str):
-    """Fetch all games for a given date. Returns list of game dicts."""
-    print(f"  Fetching scoreboard for {date_str}...")
-    sb = scoreboardv3.ScoreboardV3(game_date=date_str, league_id='00')
-    data = sb.get_dict()
+function findGamesForDate(schedule, dateStr){
+  const [y,m,d]=dateStr.split('-');
+  const targets=[
+    `${parseInt(m)}/${parseInt(d)}/${y}`,
+    `${m}/${d}/${y}`,
+    `${parseInt(m)}/${parseInt(d)}/${y} 12:00:00 AM`
+  ];
+  for(const gd of schedule.leagueSchedule.gameDates){
+    const gdDate=gd.gameDate.split(' ')[0];
+    if(targets.includes(gdDate)||targets.includes(gd.gameDate))return gd.games||[];
+  }
+  // Fallback: match by UTC date (NBA late games cross midnight UTC)
+  const allGames=[];
+  const nextDay=new Date(dateStr+'T12:00:00');nextDay.setDate(nextDay.getDate()+1);
+  const nextStr=nextDay.toISOString().slice(0,10);
+  for(const gd of schedule.leagueSchedule.gameDates){
+    for(const g of(gd.games||[])){
+      const gDate=(g.gameDateTimeUTC||g.gameDateUTC||'').slice(0,10);
+      if(gDate===dateStr||gDate===nextStr)allGames.push(g);
+    }
+  }
+  return allGames;
+}
 
-    scoreboard = data.get('scoreboard', {})
-    games = scoreboard.get('games', [])
+async function fetchBoxScore(gameId){
+  const url=`https://cdn.nba.com/static/json/liveData/boxscore/boxscore_${gameId}.json`;
+  const res=await fetch(proxied(url));
+  if(!res.ok)throw new Error(`Box score ${gameId}: ${res.status}`);
+  return await res.json();
+}
 
-    result = []
-    for g in games:
-        home = g.get('homeTeam', {})
-        away = g.get('awayTeam', {})
-        result.append({
-            'gameId': g.get('gameId', ''),
-            'status': g.get('gameStatus', 0),
-            'statusText': g.get('gameStatusText', ''),
-            'homeTeam': home.get('teamTricode', ''),
-            'awayTeam': away.get('teamTricode', ''),
-            'homeScore': home.get('score', 0),
-            'awayScore': away.get('score', 0),
-        })
+// ===================== MAIN FETCH =====================
+async function fetchDay(){
+  const dateStr=document.getElementById('datePicker').value;
+  if(!dateStr)return;
+  const btn=document.getElementById('fetchBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Loading...';
+  document.getElementById('errorArea').innerHTML='';
 
-    print(f"    Found {len(result)} games")
-    return result
+  try{
+    const schedule=await fetchSchedule();
+    progress('Finding games...',15);
+    const games=findGamesForDate(schedule,dateStr);
 
+    if(!games.length){
+      hideProgress();
+      document.getElementById('summaryArea').innerHTML='';
+      document.getElementById('gamesArea').innerHTML='';
+      document.getElementById('rankingsArea').innerHTML=`<div class="empty-state"><div class="icon">📅</div><h3>No games found</h3><p>No NBA games scheduled for ${fmtDate(dateStr)}.</p></div>`;
+      return;
+    }
 
-# ============================================================
-# FETCH BOX SCORE FOR A GAME
-# ============================================================
-def fetch_box_score(game_id, date_str, game_meta):
-    """Fetch box score for a single game. Returns list of player row dicts."""
-    print(f"    Fetching box score for {game_meta['awayTeam']}@{game_meta['homeTeam']} ({game_id})...")
+    // Filter to completed/live games (status >= 2)
+    const playedGames=games.filter(g=>(g.gameStatus||0)>=2);
+    if(!playedGames.length){
+      hideProgress();
+      document.getElementById('summaryArea').innerHTML='';
+      document.getElementById('gamesArea').innerHTML='';
+      document.getElementById('rankingsArea').innerHTML=`<div class="empty-state"><div class="icon">⏰</div><h3>${games.length} game${games.length>1?'s':''} scheduled</h3><p>Games for ${fmtDate(dateStr)} haven't started yet.</p></div>`;
+      return;
+    }
 
-    box = boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id)
-    data = box.get_dict()
+    // Fetch box scores
+    currentBoxScores=[];
+    allPlayers=[];
+    for(let i=0;i<playedGames.length;i++){
+      const g=playedGames[i];
+      const homeTri=g.homeTeam?.teamTricode||g.homeTeam?.teamCity?.slice(0,3)||'???';
+      const awayTri=g.awayTeam?.teamTricode||g.awayTeam?.teamCity?.slice(0,3)||'???';
+      progress(`Fetching ${awayTri} @ ${homeTri}...  (${i+1}/${playedGames.length})`,20+70*(i/playedGames.length));
 
-    rows = []
+      try{
+        const box=await fetchBoxScore(g.gameId);
+        currentBoxScores.push(box);
+        const gm=box.game;
+        const hTri=gm.homeTeam?.teamTricode||ID_TO_TRI[gm.homeTeam?.teamId]||homeTri;
+        const aTri=gm.awayTeam?.teamTricode||ID_TO_TRI[gm.awayTeam?.teamId]||awayTri;
+        for(const p of(gm.homeTeam?.players||[])){const s=computeStats(p,hTri,aTri,gm.gameId);if(s)allPlayers.push(s)}
+        for(const p of(gm.awayTeam?.players||[])){const s=computeStats(p,aTri,hTri,gm.gameId);if(s)allPlayers.push(s)}
+      }catch(e){console.warn(`Failed: ${g.gameId}`,e)}
+    }
 
-    # Find PlayerStats result set
-    for rs in data.get('resultSets', []):
-        if rs['name'] == 'PlayerStats':
-            headers = rs['headers']
-            for p in rs['rowSet']:
-                pdict = dict(zip(headers, p))
+    progress('Rendering...',95);
+    sortCol='rat';sortDir='desc';
+    allPlayers.sort((a,b)=>b.rat-a.rat);
+    renderSummary(dateStr);
+    renderGames(dateStr);
+    renderRankings();
+    hideProgress();
 
-                minutes = parse_minutes(pdict.get('MIN', ''))
-                if minutes <= 0:
-                    continue  # Skip DNP
+  }catch(err){
+    hideProgress();
+    document.getElementById('errorArea').innerHTML=`<div class="error-banner"><div class="inner">⚠️ ${err.message}</div></div>`;
+    console.error(err);
+  }finally{
+    btn.disabled=false;btn.textContent='Fetch Games';
+  }
+}
 
-                team_tri = pdict.get('TEAM_ABBREVIATION', '')
-                is_home = team_tri == game_meta['homeTeam']
-                opponent = game_meta['awayTeam'] if is_home else game_meta['homeTeam']
+// ===================== RENDER =====================
+function renderSummary(dateStr){
+  const nGames=currentBoxScores.length, nPlayers=allPlayers.length;
+  const top=allPlayers[0];
+  const topScorer=[...allPlayers].sort((a,b)=>b.pts-a.pts)[0];
+  let h=`<div class="summary-bar">`;
+  h+=`<div class="stat-card"><div class="label">Date</div><div class="value">${new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div><div class="sub">${fmtDate(dateStr).split(',')[0]}</div></div>`;
+  h+=`<div class="stat-card"><div class="label">Games</div><div class="value">${nGames}</div><div class="sub">${nPlayers} players</div></div>`;
+  if(top)h+=`<div class="stat-card"><div class="label">Player of the Day</div><div class="value" style="font-size:1.1rem">${top.name}</div><div class="sub">${top.rat} RAT · ${top.pts}p/${top.reb}r/${top.ast}a</div></div>`;
+  if(topScorer&&topScorer!==top)h+=`<div class="stat-card"><div class="label">High Scorer</div><div class="value" style="font-size:1.1rem">${topScorer.name}</div><div class="sub">${topScorer.pts} PTS · ${(topScorer.ts*100).toFixed(1)}% TS</div></div>`;
+  h+=`</div>`;
+  document.getElementById('summaryArea').innerHTML=h;
+}
 
-                row = {
-                    'Date': date_str,
-                    'GameID': game_id,
-                    'Player': pdict.get('PLAYER_NAME', ''),
-                    'PersonID': pdict.get('PLAYER_ID', ''),
-                    'Team': team_tri,
-                    'Opponent': opponent,
-                    'Home': 1 if is_home else 0,
-                    'MIN': round(minutes, 1),
-                    'PTS': int(pdict.get('PTS', 0) or 0),
-                    'FGM': int(pdict.get('FGM', 0) or 0),
-                    'FGA': int(pdict.get('FGA', 0) or 0),
-                    '3PM': int(pdict.get('FG3M', 0) or 0),
-                    '3PA': int(pdict.get('FG3A', 0) or 0),
-                    'FTM': int(pdict.get('FTM', 0) or 0),
-                    'FTA': int(pdict.get('FTA', 0) or 0),
-                    'ORB': int(pdict.get('OREB', 0) or 0),
-                    'DRB': int(pdict.get('DREB', 0) or 0),
-                    'REB': int(pdict.get('REB', 0) or 0),
-                    'AST': int(pdict.get('AST', 0) or 0),
-                    'STL': int(pdict.get('STL', 0) or 0),
-                    'BLK': int(pdict.get('BLK', 0) or 0),
-                    'TOV': int(pdict.get('TO', 0) or 0),
-                    'PF': int(pdict.get('PF', 0) or 0),
-                    '+/-': int(pdict.get('PLUS_MINUS', 0) or 0),
-                    'FG%': 0, '3P%': 0, 'FT%': 0, 'TS%': 0, 'GmScr': 0, 'RAT': 0,
-                    'HomeTeam': game_meta['homeTeam'],
-                    'AwayTeam': game_meta['awayTeam'],
-                    'HomeScore': game_meta['homeScore'],
-                    'AwayScore': game_meta['awayScore'],
-                    'GameStatus': game_meta['statusText'],
-                }
+function renderGames(dateStr){
+  let h=`<div class="games-section"><h2>Games — ${fmtDate(dateStr)}</h2><div class="games-grid">`;
+  for(const box of currentBoxScores){
+    const gm=box.game;
+    const hTri=gm.homeTeam?.teamTricode||'???', aTri=gm.awayTeam?.teamTricode||'???';
+    const hs=gm.homeTeam?.score??0, as=gm.awayTeam?.score??0, hw=hs>as;
+    const st=gm.gameStatus, stText=gm.gameStatusText||'Final';
+    const stCls=st===2?'live':st>=3?'final':'upcoming';
+    h+=`<div class="game-card" onclick="openBox('${gm.gameId}')">`;
+    h+=`<span class="status-badge ${stCls}">${stText}</span>`;
+    h+=`<div class="team-row"><img src="${teamLogo(aTri)}" onerror="this.style.display='none'"><span class="team-name">${TEAM_NAMES[aTri]||aTri}</span><span class="score ${!hw&&hs!==as?'winner':''}">${as}</span></div>`;
+    h+=`<hr class="vs-divider">`;
+    h+=`<div class="team-row"><img src="${teamLogo(hTri)}" onerror="this.style.display='none'"><span class="team-name">${TEAM_NAMES[hTri]||hTri}</span><span class="score ${hw?'winner':''}">${hs}</span></div></div>`;
+  }
+  h+=`</div></div>`;document.getElementById('gamesArea').innerHTML=h;
+}
 
-                row = compute_advanced(row)
-                rows.append(row)
+function renderRankings(){
+  const players=[...allPlayers].sort((a,b)=>{
+    let va=a[sortCol],vb=b[sortCol];
+    if(typeof va==='string')return sortDir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    return sortDir==='asc'?va-vb:vb-va;
+  });
+  const cols=[{k:'rank',l:'#'},{k:'name',l:'Player'},{k:'min',l:'Min'},{k:'pts',l:'Pts'},{k:'reb',l:'Reb'},{k:'ast',l:'Ast'},{k:'stl',l:'Stl'},{k:'blk',l:'Blk'},{k:'tov',l:'TO'},{k:'pm',l:'+/−'},{k:'fgPct',l:'FG%'},{k:'fg3Pct',l:'3P%'},{k:'ftPct',l:'FT%'},{k:'ts',l:'TS%'},{k:'gmScr',l:'GmScr'},{k:'rat',l:'RAT'}];
+  let h=`<div class="rankings-section"><div class="rankings-header"><h2>Player Rankings</h2><div class="rankings-filters">`;
+  h+=`<input type="text" placeholder="Search player..." oninput="filterName(this.value)">`;
+  h+=`<select onchange="filterTeam(this.value)"><option value="">All Teams</option>`;
+  const teams=[...new Set(allPlayers.map(p=>p.team))].sort();for(const t of teams)h+=`<option value="${t}">${t}</option>`;
+  h+=`</select><select onchange="filterMin(this.value)"><option value="0">All Minutes</option><option value="10">10+ MIN</option><option value="20">20+ MIN</option><option value="25">25+ MIN</option></select></div></div>`;
+  h+=`<div class="table-wrap"><table><thead><tr>`;
+  for(const c of cols){const ar=sortCol===c.k?(sortDir==='desc'?'▼':'▲'):'';const sc=sortCol===c.k?' sorted':'';h+=`<th class="${sc}" onclick="doSort('${c.k}')">${c.l}${ar?`<span class="arrow">${ar}</span>`:''}</th>`}
+  h+=`</tr></thead><tbody id="rankingsBody">`;
+  for(let i=0;i<players.length;i++)h+=buildRow(players[i],i+1);
+  h+=`</tbody></table></div></div>`;
+  document.getElementById('rankingsArea').innerHTML=h;
+}
 
-    print(f"      → {len(rows)} players")
-    return rows
+function buildRow(p,rank){
+  const badge=rank===1?'<span class="top-badge gold">★ POTD</span>':rank===2?'<span class="top-badge silver">2ND</span>':rank===3?'<span class="top-badge bronze">3RD</span>':'';
+  let t=`<tr data-name="${p.name.toLowerCase()}" data-team="${p.team}" data-min="${p.min}">`;
+  t+=`<td class="rank-cell">${rank}</td>`;
+  t+=`<td class="player-cell"><img src="${playerHeadshot(p.personId)}" onerror="this.style.display='none'" loading="lazy"><span class="pname">${p.name}${badge}</span><span class="pteam">${p.team}</span></td>`;
+  t+=`<td class="num">${p.min.toFixed(0)}</td><td class="num" style="font-weight:700">${p.pts}</td>`;
+  t+=`<td class="num">${p.reb}</td><td class="num">${p.ast}</td><td class="num">${p.stl}</td><td class="num">${p.blk}</td><td class="num">${p.tov}</td>`;
+  t+=`<td class="num ${p.pm>0?'positive':p.pm<0?'negative':''}">${p.pm>0?'+':''}${p.pm}</td>`;
+  t+=`<td class="num">${(p.fgPct*100).toFixed(0)}%</td><td class="num">${(p.fg3Pct*100).toFixed(0)}%</td><td class="num">${(p.ftPct*100).toFixed(0)}%</td>`;
+  t+=`<td class="num" style="color:${p.ts>=0.6?'var(--positive)':p.ts<0.45?'var(--negative)':'inherit'}">${(p.ts*100).toFixed(1)}%</td>`;
+  t+=`<td class="num">${p.gmScr.toFixed(1)}</td>`;
+  t+=`<td class="rat-cell" style="color:${p.rat>=30?'var(--accent-gold)':p.rat>=20?'var(--accent-cyan)':'inherit'}">${p.rat.toFixed(1)}</td></tr>`;
+  return t;
+}
 
+// ===================== SORT & FILTER =====================
+function doSort(col){if(col==='rank')return;if(sortCol===col)sortDir=sortDir==='desc'?'asc':'desc';else{sortCol=col;sortDir=col==='name'?'asc':'desc'}renderRankings()}
+function filterName(q){q=q.toLowerCase();document.querySelectorAll('#rankingsBody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none'})}
+function filterTeam(t){document.querySelectorAll('#rankingsBody tr').forEach(tr=>{tr.style.display=(!t||tr.dataset.team===t)?'':'none'})}
+function filterMin(m){m=parseFloat(m);document.querySelectorAll('#rankingsBody tr').forEach(tr=>{tr.style.display=parseFloat(tr.dataset.min)>=m?'':'none'})}
 
-# ============================================================
-# PUSH TO GOOGLE SHEETS
-# ============================================================
-def push_to_sheets(ws, all_rows, date_str):
-    """Push player rows to the Google Sheet, replacing data for the given date."""
-    if not all_rows:
-        print(f"  No data to push for {date_str}")
-        return
+// ===================== BOX SCORE MODAL =====================
+function openBox(gameId){
+  const box=currentBoxScores.find(b=>b.game?.gameId===gameId);if(!box)return;
+  const gm=box.game;
+  const hTri=gm.homeTeam?.teamTricode||'???', aTri=gm.awayTeam?.teamTricode||'???';
+  document.getElementById('boxTitle').textContent=`${TEAM_NAMES[aTri]||aTri} ${gm.awayTeam?.score??0} — ${TEAM_NAMES[hTri]||hTri} ${gm.homeTeam?.score??0}`;
 
-    # Read existing data to find and remove old rows for this date
-    existing = ws.get_all_values()
+  let h='';
+  for(const side of['awayTeam','homeTeam']){
+    const team=gm[side];if(!team)continue;
+    const tri=team.teamTricode||'???';
+    const players=(team.players||[]).map(p=>({raw:p,stats:computeStats(p,tri,side==='homeTeam'?aTri:hTri,gameId)}));
+    players.sort((a,b)=>(b.stats?.min||0)-(a.stats?.min||0));
 
-    if len(existing) <= 1:
-        # Empty sheet (just header or nothing) — write header + data
-        header = [HEADER_ROW]
-        data_rows = [[r.get(h, '') for h in HEADER_ROW] for r in all_rows]
-        ws.update('A1', header + data_rows)
-        print(f"  Wrote {len(data_rows)} rows (fresh sheet)")
-        return
+    h+=`<div class="box-team-label"><img src="${teamLogo(tri)}" onerror="this.style.display='none'"> ${TEAM_NAMES[tri]||tri} (${team.score??0})</div>`;
+    h+=`<div class="table-wrap"><table><thead><tr><th>Player</th><th>Min</th><th>Pts</th><th>FGM-A</th><th>3PM-A</th><th>FTM-A</th><th>ORB</th><th>DRB</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TO</th><th>PF</th><th>+/−</th><th>TS%</th><th>GmScr</th><th>RAT</th></tr></thead><tbody>`;
 
-    # Filter out existing rows for this date
-    header = existing[0]
-    date_col = header.index('Date') if 'Date' in header else 0
-    kept = [existing[0]]  # keep header
-    for row in existing[1:]:
-        if len(row) > date_col and row[date_col] == date_str:
-            continue  # remove old data for this date
-        kept.append(row)
+    let tot={pts:0,fgm:0,fga:0,fg3m:0,fg3a:0,ftm:0,fta:0,orb:0,drb:0,reb:0,ast:0,stl:0,blk:0,tov:0,pf:0};
+    for(const{raw:rp,stats:s}of players){
+      const nm=rp.name||`${rp.firstName||''} ${rp.familyName||''}`.trim();
+      if(!s){h+=`<tr class="dnp"><td style="font-weight:500">${nm}</td><td colspan="17" style="color:var(--text-muted);font-size:0.75rem">DNP</td></tr>`;continue}
+      tot.pts+=s.pts;tot.fgm+=s.fgm;tot.fga+=s.fga;tot.fg3m+=s.fg3m;tot.fg3a+=s.fg3a;tot.ftm+=s.ftm;tot.fta+=s.fta;
+      tot.orb+=s.orb;tot.drb+=s.drb;tot.reb+=s.reb;tot.ast+=s.ast;tot.stl+=s.stl;tot.blk+=s.blk;tot.tov+=s.tov;tot.pf+=s.pf;
+      h+=`<tr><td style="font-weight:500;min-width:130px">${nm}</td><td class="num">${s.min.toFixed(0)}</td><td class="num" style="font-weight:700">${s.pts}</td>`;
+      h+=`<td class="num">${s.fgm}-${s.fga}</td><td class="num">${s.fg3m}-${s.fg3a}</td><td class="num">${s.ftm}-${s.fta}</td>`;
+      h+=`<td class="num">${s.orb}</td><td class="num">${s.drb}</td><td class="num">${s.reb}</td><td class="num">${s.ast}</td><td class="num">${s.stl}</td><td class="num">${s.blk}</td><td class="num">${s.tov}</td><td class="num">${s.pf}</td>`;
+      h+=`<td class="num ${s.pm>0?'positive':s.pm<0?'negative':''}">${s.pm>0?'+':''}${s.pm}</td>`;
+      h+=`<td class="num">${(s.ts*100).toFixed(1)}%</td><td class="num">${s.gmScr.toFixed(1)}</td>`;
+      h+=`<td class="num" style="font-weight:700;color:${s.rat>=30?'var(--accent-gold)':s.rat>=20?'var(--accent-cyan)':'inherit'}">${s.rat.toFixed(1)}</td></tr>`;
+    }
+    const tt=tot;
+    h+=`<tr class="team-totals"><td>TOTALS</td><td></td><td class="num">${tt.pts}</td><td class="num">${tt.fgm}-${tt.fga}</td><td class="num">${tt.fg3m}-${tt.fg3a}</td><td class="num">${tt.ftm}-${tt.fta}</td>`;
+    h+=`<td class="num">${tt.orb}</td><td class="num">${tt.drb}</td><td class="num">${tt.reb}</td><td class="num">${tt.ast}</td><td class="num">${tt.stl}</td><td class="num">${tt.blk}</td><td class="num">${tt.tov}</td><td class="num">${tt.pf}</td><td></td><td></td><td></td><td></td></tr>`;
+    h+=`</tbody></table></div>`;
+  }
+  document.getElementById('boxContent').innerHTML=h;
+  document.getElementById('boxOverlay').classList.add('open');document.body.style.overflow='hidden';
+}
+function closeBox(){document.getElementById('boxOverlay').classList.remove('open');document.body.style.overflow=''}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeBox()});
 
-    # Append new data
-    new_rows = [[r.get(h, '') for h in HEADER_ROW] for r in all_rows]
-    final = kept + new_rows
-
-    # Clear and rewrite (handles row count changes)
-    ws.clear()
-    ws.update('A1', final)
-    print(f"  Pushed {len(new_rows)} rows for {date_str} ({len(final) - 1} total rows)")
-
-
-# ============================================================
-# MAIN
-# ============================================================
-def process_date(date_str, ws):
-    """Fetch and push all stats for a single date."""
-    print(f"\n{'='*50}")
-    print(f"Processing {date_str}")
-    print(f"{'='*50}")
-
-    games = fetch_games(date_str)
-    if not games:
-        print(f"  No games found for {date_str}")
-        return 0
-
-    all_rows = []
-    for g in games:
-        if g['status'] < 2:
-            print(f"    Skipping {g['awayTeam']}@{g['homeTeam']} — not started yet")
-            continue
-        time.sleep(SLEEP_BETWEEN_GAMES)
-        try:
-            rows = fetch_box_score(g['gameId'], date_str, g)
-            all_rows.extend(rows)
-        except Exception as e:
-            print(f"    ERROR fetching {g['gameId']}: {e}")
-
-    # Sort by RAT descending
-    all_rows.sort(key=lambda r: r['RAT'], reverse=True)
-
-    push_to_sheets(ws, all_rows, date_str)
-    return len(all_rows)
-
-
-def main():
-    # Parse arguments
-    if len(sys.argv) == 1:
-        # Today (Pacific time)
-        from datetime import timezone
-        now_utc = datetime.now(timezone.utc)
-        pacific_offset = timedelta(hours=-8)  # PST (simplification)
-        today = (now_utc + pacific_offset).strftime('%Y-%m-%d')
-        dates = [today]
-    elif len(sys.argv) == 2:
-        dates = [sys.argv[1]]
-    elif len(sys.argv) == 3:
-        # Date range
-        start = datetime.strptime(sys.argv[1], '%Y-%m-%d')
-        end = datetime.strptime(sys.argv[2], '%Y-%m-%d')
-        dates = []
-        d = start
-        while d <= end:
-            dates.append(d.strftime('%Y-%m-%d'))
-            d += timedelta(days=1)
-    else:
-        print("Usage: python daily_stats_fetcher.py [date] [end_date]")
-        print("  No args     → fetch today")
-        print("  One date    → fetch that date")
-        print("  Two dates   → fetch date range")
-        sys.exit(1)
-
-    print(f"NBA Daily Stats Fetcher — Hoopsmatic")
-    print(f"Dates to process: {', '.join(dates)}")
-
-    # Connect to Google Sheets
-    ws = connect_sheets()
-
-    total = 0
-    for date_str in dates:
-        total += process_date(date_str, ws)
-        if len(dates) > 1:
-            time.sleep(1)  # Extra delay between dates
-
-    print(f"\n✅ Done! {total} total player rows across {len(dates)} date(s).")
-
-
-if __name__ == '__main__':
-    main()
+// ===================== INIT =====================
+document.getElementById('datePicker').value=todayPacific();
+</script>
+</body>
+</html>
