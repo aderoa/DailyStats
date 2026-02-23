@@ -16,12 +16,6 @@
 .header-brand h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:2rem;letter-spacing:0.05em;text-transform:uppercase}
 .header-brand .tag{font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--accent-gold);background:rgba(240,182,55,0.12);padding:0.2em 0.6em;border-radius:3px;letter-spacing:0.08em;text-transform:uppercase}
 .header-subtitle{color:var(--text-secondary);font-size:0.95rem}
-.date-controls{display:flex;align-items:center;gap:0.75rem}
-.date-controls input[type="date"]{font-family:'JetBrains Mono',monospace;font-size:0.9rem;padding:0.55rem 0.85rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);outline:none;color-scheme:dark;cursor:pointer}
-.btn-fetch{font-family:'Oswald',sans-serif;font-size:0.95rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:0.55rem 1.5rem;border:none;border-radius:6px;background:var(--accent-blue);color:#fff;cursor:pointer;transition:all 0.2s}
-.btn-fetch:hover{background:#2563eb;transform:translateY(-1px)}.btn-fetch:disabled{opacity:0.5;cursor:not-allowed;transform:none}
-.btn-prev,.btn-next{font-size:1.1rem;padding:0.45rem 0.7rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);cursor:pointer;transition:all 0.15s}
-.btn-prev:hover,.btn-next:hover{border-color:var(--accent-blue);color:var(--text-primary)}
 .summary-bar{max-width:1400px;margin:1.25rem auto 0;padding:0 2rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem}
 .stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.15rem}
 .stat-card .label{font-family:'JetBrains Mono',monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);margin-bottom:0.2rem}
@@ -113,7 +107,7 @@ td.positive{color:var(--positive)}td.negative{color:var(--negative)}
 </style>
 </head>
 <body>
-<div class="header"><div class="header-inner"><div class="header-left"><div class="header-brand"><h1>Daily Stats</h1><span class="tag">Hoopsmatic</span></div><div class="header-subtitle">Box scores, advanced stats & player ratings</div></div><div class="date-controls"><button class="btn-prev" onclick="shiftDate(-1)">◀</button><input type="date" id="datePicker"><button class="btn-next" onclick="shiftDate(1)">▶</button><button class="btn-fetch" id="fetchBtn" onclick="fetchDay()">Fetch Games</button></div></div></div>
+<div class="header"><div class="header-inner"><div class="header-left"><div class="header-brand"><h1>Daily Stats</h1><span class="tag">Hoopsmatic</span></div><div class="header-subtitle" id="headerDate">Loading today's games...</div></div></div></div>
 <div id="errorArea"></div>
 <div class="progress-bar" id="progressBar"><div class="progress-inner"><span id="progressText">Loading...</span><div style="background:var(--border);border-radius:2px;height:3px;margin-top:0.5rem"><div id="progressFill" style="height:3px;background:var(--accent-blue);border-radius:2px;transition:width 0.3s;width:0%"></div></div></div></div>
 <div id="summaryArea"></div>
@@ -194,8 +188,6 @@ let viewMode='standard'; // standard|advanced|hustle|clutch|misc
 let sortCol='rat', sortDir='desc';
 
 // ===================== UTILITIES =====================
-function todayPacific(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'})}
-function shiftDate(d){const p=document.getElementById('datePicker');const dt=new Date(p.value+'T12:00:00');dt.setDate(dt.getDate()+d);p.value=dt.toISOString().slice(0,10)}
 function fmtDate(s){return new Date(s+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}
 function progress(msg,pct){document.getElementById('progressBar').classList.add('active');document.getElementById('progressText').textContent=msg;document.getElementById('progressFill').style.width=pct+'%'}
 function hideProgress(){document.getElementById('progressBar').classList.remove('active')}
@@ -327,22 +319,6 @@ async function fetchAllMisc(){
   updateModeBadges();
 }
 
-// ===================== SHEET RAT — from Traditional Stats sheet =====================
-async function fetchSheetRat(){
-  sheetRatMap={};
-  try{
-    const res=await fetch(sheetCSV(GID_RAT));
-    if(!res.ok)return;
-    const rows=parseCSV(await res.text());
-    for(const r of rows){
-      const pid=parseInt(r._raw[COL_PLAYER_ID]);if(!pid)continue;
-      const rat=parseFloat(r._raw[COL_RAT]);
-      if(!isNaN(rat))sheetRatMap[pid]=rat;
-    }
-    console.log(`Sheet RAT: ${Object.keys(sheetRatMap).length} players`);
-  }catch(e){console.warn('Sheet RAT:',e.message)}
-}
-
 // ===================== CLUTCH RAT — from Clutch Stats sheet =====================
 async function fetchClutchRat(){
   clutchRatMap={};
@@ -456,13 +432,28 @@ async function fetchBoxScore(gid){const res=await fetch(proxied(`https://cdn.nba
 
 // ===================== MAIN FETCH =====================
 async function fetchDay(){
-  const dateStr=document.getElementById('datePicker').value;if(!dateStr)return;
-  const btn=document.getElementById('fetchBtn');
-  btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Loading...';
   document.getElementById('errorArea').innerHTML='';
   hustleStatus='none';clutchStatus='none';miscStatus='none';hustleMap={};clutchMap={};miscMap={};hustleDate='';miscDate='';sheetRatMap={};clutchRatMap={};updateModeBadges();
 
   try{
+    // 1) Detect date from RAT sheet metadata (row 1: "Date: MM/DD/YYYY | ...")
+    progress('Detecting game date from sheet...',5);
+    const ratRes=await fetch(sheetCSV(GID_RAT));
+    if(!ratRes.ok)throw new Error('Could not fetch sheet data');
+    const ratText=await ratRes.text();
+    const dm=ratText.match(/Date:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(!dm)throw new Error('Could not detect date from sheet');
+    const dateStr=`${dm[3]}-${dm[1].padStart(2,'0')}-${dm[2].padStart(2,'0')}`;
+    document.getElementById('headerDate').textContent=fmtDate(dateStr);
+
+    // Parse RAT values while we already have the text
+    const ratRows=parseCSV(ratText);
+    for(const r of ratRows){
+      const pid=parseInt(r._raw[COL_PLAYER_ID]);if(!pid)continue;
+      const rat=parseFloat(r._raw[COL_RAT]);
+      if(!isNaN(rat))sheetRatMap[pid]=rat;
+    }
+
     const schedule=await fetchSchedule();
     progress('Finding games...',15);
     const games=findGames(schedule,dateStr);
@@ -496,17 +487,16 @@ async function fetchDay(){
     progress('Computing advanced stats...',75);
     computeAdvanced(allPlayers);
 
-    // Sort by RAT
+    // Sort by RAT (computed for now, sheet override applied after)
     sortCol='rat';sortDir='desc';viewMode='standard';
     allPlayers.sort((a,b)=>b.rat-a.rat);
     renderSummary(dateStr);renderGames(dateStr);renderRankings();
-    hideProgress();
 
-    // Fire off sheet data in parallel (non-blocking)
+    // Fire off remaining sheet data in parallel
     progress('Fetching sheet data...',85);
     await Promise.allSettled([
       fetchAllHustle(),fetchAllClutch(gameIds),fetchAllMisc(),
-      fetchSheetRat(),fetchClutchRat(),fetchNameMap()
+      fetchClutchRat(),fetchNameMap()
     ]);
 
     // Apply name map (HH NAME) and sheet RAT overrides
@@ -522,7 +512,7 @@ async function fetchDay(){
   }catch(err){
     hideProgress();
     document.getElementById('errorArea').innerHTML=`<div class="error-banner"><div class="inner">⚠️ ${err.message}</div></div>`;
-  }finally{btn.disabled=false;btn.textContent='Fetch Games'}
+  }
 }
 
 // ===================== MODE BADGE UPDATE =====================
@@ -768,7 +758,7 @@ function closeBox(){document.getElementById('boxOverlay').classList.remove('open
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeBox()});
 
 // ===================== INIT =====================
-document.getElementById('datePicker').value=todayPacific();
+fetchDay();
 </script>
 </body>
 </html>
