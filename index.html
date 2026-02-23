@@ -130,7 +130,23 @@ function proxied(url){return PROXY+encodeURIComponent(url)}
 const SHEET_PUB='https://docs.google.com/spreadsheets/d/e/2PACX-1vS2iZj3avZ_-CAWKu-f_pxZkf38M0quXQwMbyTXmHsN6-c9V8vU1l_sNaxg0y8dl07dqraU3_5Z3b8D/pub';
 const GID_HUSTLE='1809402386';
 const GID_MISC='384588563';
+const GID_RAT='295683685';       // Traditional — col B=PLAYER_NAME, BV=RAT
+const GID_CLUTCH_RAT='197990217'; // Clutch — col BW=clutch RAT
+const GID_NAMES='1197809522';     // Nomenclature — col L=NBA NAME, M=HH NAME
 function sheetCSV(gid){return`${SHEET_PUB}?gid=${gid}&single=true&output=csv`}
+
+// Column letter → 0-based index (A=0, BV=73, BW=74, L=11, M=12)
+function colIdx(letter){
+  let n=0;
+  for(let i=0;i<letter.length;i++)n=n*26+(letter.charCodeAt(i)-64);
+  return n-1;
+}
+const COL_RAT=colIdx('BV');       // 73
+const COL_CLUTCH_RAT=colIdx('BW'); // 74
+const COL_NBA_NAME=colIdx('L');    // 11
+const COL_HH_NAME=colIdx('M');     // 12
+const COL_PLAYER_ID=colIdx('A');   // 0
+const COL_PLAYER_NAME=colIdx('B'); // 1
 
 function parseCSV(text){
   // Parse CSV handling quoted fields; skip row 1 (metadata) and row 2 (empty), headers on row 3
@@ -153,6 +169,7 @@ function parseCSV(text){
   for(let i=3;i<lines.length;i++){
     if(lines[i].length<2)continue;
     const obj={};hdrs.forEach((h,j)=>obj[h.trim()]=lines[i][j]||'');
+    obj._raw=lines[i]; // keep raw array for positional access
     rows.push(obj);
   }
   return rows;
@@ -170,6 +187,9 @@ let scheduleCache=null, currentBoxScores=[], allPlayers=[];
 let hustleMap={}, clutchMap={}, miscMap={};  // personId → stats
 let hustleStatus='none', clutchStatus='none', miscStatus='none';
 let hustleDate='', miscDate=''; // date from sheet metadata row
+let nameMap={};       // NBA name → HH name
+let sheetRatMap={};   // personId → RAT from sheet
+let clutchRatMap={};  // personId → clutch RAT from sheet
 let viewMode='standard'; // standard|advanced|hustle|clutch|misc
 let sortCol='rat', sortDir='desc';
 
@@ -307,6 +327,54 @@ async function fetchAllMisc(){
   updateModeBadges();
 }
 
+// ===================== SHEET RAT — from Traditional Stats sheet =====================
+async function fetchSheetRat(){
+  sheetRatMap={};
+  try{
+    const res=await fetch(sheetCSV(GID_RAT));
+    if(!res.ok)return;
+    const rows=parseCSV(await res.text());
+    for(const r of rows){
+      const pid=parseInt(r._raw[COL_PLAYER_ID]);if(!pid)continue;
+      const rat=parseFloat(r._raw[COL_RAT]);
+      if(!isNaN(rat))sheetRatMap[pid]=rat;
+    }
+    console.log(`Sheet RAT: ${Object.keys(sheetRatMap).length} players`);
+  }catch(e){console.warn('Sheet RAT:',e.message)}
+}
+
+// ===================== CLUTCH RAT — from Clutch Stats sheet =====================
+async function fetchClutchRat(){
+  clutchRatMap={};
+  try{
+    const res=await fetch(sheetCSV(GID_CLUTCH_RAT));
+    if(!res.ok)return;
+    const rows=parseCSV(await res.text());
+    for(const r of rows){
+      const pid=parseInt(r._raw[COL_PLAYER_ID]);if(!pid)continue;
+      const rat=parseFloat(r._raw[COL_CLUTCH_RAT]);
+      if(!isNaN(rat))clutchRatMap[pid]=rat;
+    }
+    console.log(`Clutch RAT: ${Object.keys(clutchRatMap).length} players`);
+  }catch(e){console.warn('Clutch RAT:',e.message)}
+}
+
+// ===================== NAME MAP — NBA NAME → HH NAME =====================
+async function fetchNameMap(){
+  nameMap={};
+  try{
+    const res=await fetch(sheetCSV(GID_NAMES));
+    if(!res.ok)return;
+    const rows=parseCSV(await res.text());
+    for(const r of rows){
+      const nba=(r._raw[COL_NBA_NAME]||'').trim();
+      const hh=(r._raw[COL_HH_NAME]||'').trim();
+      if(nba&&hh)nameMap[nba]=hh;
+    }
+    console.log(`Name map: ${Object.keys(nameMap).length} players`);
+  }catch(e){console.warn('Name map:',e.message)}
+}
+
 // ===================== CLUTCH STATS — CDN play-by-play =====================
 async function fetchAllClutch(gameIds){
   clutchMap={};clutchStatus='loading';updateModeBadges();
@@ -392,7 +460,7 @@ async function fetchDay(){
   const btn=document.getElementById('fetchBtn');
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Loading...';
   document.getElementById('errorArea').innerHTML='';
-  hustleStatus='none';clutchStatus='none';miscStatus='none';hustleMap={};clutchMap={};miscMap={};hustleDate='';miscDate='';updateModeBadges();
+  hustleStatus='none';clutchStatus='none';miscStatus='none';hustleMap={};clutchMap={};miscMap={};hustleDate='';miscDate='';sheetRatMap={};clutchRatMap={};updateModeBadges();
 
   try{
     const schedule=await fetchSchedule();
@@ -434,11 +502,22 @@ async function fetchDay(){
     renderSummary(dateStr);renderGames(dateStr);renderRankings();
     hideProgress();
 
-    // Fire off hustle + clutch in parallel (non-blocking)
-    progress('Fetching hustle, clutch & misc data...',85);
-    await Promise.allSettled([fetchAllHustle(),fetchAllClutch(gameIds),fetchAllMisc()]);
+    // Fire off sheet data in parallel (non-blocking)
+    progress('Fetching sheet data...',85);
+    await Promise.allSettled([
+      fetchAllHustle(),fetchAllClutch(gameIds),fetchAllMisc(),
+      fetchSheetRat(),fetchClutchRat(),fetchNameMap()
+    ]);
+
+    // Apply name map (HH NAME) and sheet RAT overrides
+    for(const p of allPlayers){
+      if(nameMap[p.name])p.name=nameMap[p.name];
+      if(sheetRatMap[p.personId]!=null)p.rat=sheetRatMap[p.personId];
+    }
+    allPlayers.sort((a,b)=>b.rat-a.rat);
+
     hideProgress();
-    if(['hustle','clutch','misc'].includes(viewMode))renderRankings();
+    renderSummary(dateStr);renderRankings();
 
   }catch(err){
     hideProgress();
@@ -506,7 +585,7 @@ const COLS={
     {k:'c_fg3m',l:'C-3PM'},{k:'c_fg3a',l:'C-3PA'},{k:'c_ftm',l:'C-FTM'},{k:'c_fta',l:'C-FTA'},
     {k:'c_reb',l:'C-Reb'},{k:'c_ast',l:'C-Ast'},{k:'c_tov',l:'C-TO'},
     {k:'c_stl',l:'C-Stl'},{k:'c_blk',l:'C-Blk'},
-    {k:'rat',l:'RAT'}
+    {k:'c_rat',l:'RAT'}
   ],
   misc:[
     {k:'rank',l:'#'},{k:'name',l:'Player'},{k:'min',l:'Min'},
@@ -523,7 +602,7 @@ function setMode(mode){viewMode=mode;
   if(mode==='standard')sortCol='rat';
   else if(mode==='advanced')sortCol='rat';
   else if(mode==='hustle')sortCol='h_defl';
-  else if(mode==='clutch')sortCol='c_pts';
+  else if(mode==='clutch')sortCol='c_rat';
   else if(mode==='misc')sortCol='m_ptsPaint';
   sortDir='desc';renderRankings();
 }
@@ -544,6 +623,7 @@ function renderRankings(){
       c_pts:clut.pts||0,c_fgm:clut.fgm||0,c_fga:clut.fga||0,
       c_fg3m:clut.fg3m||0,c_fg3a:clut.fg3a||0,c_ftm:clut.ftm||0,c_fta:clut.fta||0,
       c_reb:clut.reb||0,c_ast:clut.ast||0,c_tov:clut.tov||0,c_stl:clut.stl||0,c_blk:clut.blk||0,
+      c_rat:clutchRatMap[p.personId]!=null?clutchRatMap[p.personId]:0,
       m_ptsPaint:misc.ptsPaint||0,m_ptsFb:misc.ptsFb||0,m_pts2nd:misc.pts2nd||0,
       m_ptsOffTov:misc.ptsOffTov||0,
       m_oppPtsPaint:misc.oppPtsPaint||0,m_oppPtsFb:misc.oppPtsFb||0,m_oppPts2nd:misc.oppPts2nd||0,
@@ -617,7 +697,7 @@ function buildRow(p,rank,cols){
     if(c.k==='name'){t+=`<td class="player-cell"><img src="${headshot(p.personId)}" onerror="this.style.display='none'" loading="lazy"><span class="pname">${p.name}${badge}</span><span class="pteam">${p.team}</span></td>`;continue}
     const v=p[c.k];
     // Format based on key
-    if(c.k==='rat'){t+=`<td class="rat-cell" style="color:${v>=30?'var(--accent-gold)':v>=20?'var(--accent-cyan)':'inherit'}">${v.toFixed(1)}</td>`;continue}
+    if(c.k==='rat'||c.k==='c_rat'){t+=`<td class="rat-cell" style="color:${v>=30?'var(--accent-gold)':v>=20?'var(--accent-cyan)':'inherit'}">${v.toFixed(1)}</td>`;continue}
     if(c.k==='pm'){t+=`<td class="num ${v>0?'positive':v<0?'negative':''}">${v>0?'+':''}${v}</td>`;continue}
     if(c.k==='pts'){t+=`<td class="num" style="font-weight:700">${v}</td>`;continue}
     if(c.k==='gmScr'){t+=`<td class="num">${v.toFixed(1)}</td>`;continue}
